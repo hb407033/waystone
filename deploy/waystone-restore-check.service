@@ -1,0 +1,8 @@
+[Unit]
+Description=Waystone isolated restore verification
+After=docker.service
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/waystone/restore-check.py
+UMask=0077
+TimeoutStartSec=900

@@ -1,0 +1,18 @@
+[Unit]
+Description=Waystone independent monitor and offsite backup pull
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=waystone-offsite
+Group=waystone-offsite
+ExecStart=/usr/bin/python3 /opt/waystone-offsite/offsite-monitor.py
+UMask=0077
+TimeoutStartSec=7min
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/waystone-offsite
+

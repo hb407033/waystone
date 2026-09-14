@@ -1,0 +1,17 @@
+[Unit]
+Description=Send Waystone fault and recovery email
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=waystone-offsite
+Group=waystone-offsite
+ExecStart=/usr/bin/python3 /opt/waystone-offsite/offsite-notify.py
+UMask=0077
+TimeoutStartSec=10min
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/waystone-offsite

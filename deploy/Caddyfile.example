@@ -1,0 +1,40 @@
+# 把 memory.example.com 换成你的域名；/install.md 等静态文件是可选的安装说明托管目录。
+memory.example.com {
+    encode zstd gzip
+    header {
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        Referrer-Policy no-referrer
+        -Server
+    }
+    request_body {
+        max_size 512KB
+    }
+    @public path /install.md /waystone-skill.md /downloads/*
+    handle @public {
+        root * /var/www/waystone
+        file_server
+    }
+    handle / {
+        redir * /install.md 302
+    }
+    handle {
+        header Cache-Control "no-store"
+        # 服务按 X-Forwarded-For 做登录限流，这里只写入一个可信来源 IP 并覆盖客户端自带的值。
+        # 对端属于 Cloudflare 网段且带 CF-Connecting-IP 时取该头；否则（绕过 Cloudflare 直连，或 Cloudflare 未给出该头）只认 TCP 对端地址，防止伪造来源躲限流。
+        # 网段取自 https://www.cloudflare.com/ips-v4 与 ips-v6（2026-09-14），Cloudflare 调整网段时同步更新本文件和 tests/test_proxy.py。
+        # tests/test_proxy.py 会截取 forwarding-begin 与 forwarding-end 之间的配置在容器里实跑，改动这两个标记时同步修改测试。
+        # forwarding-begin
+        @cloudflare {
+            remote_ip 173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22 141.101.64.0/18 108.162.192.0/18 190.93.240.0/20 188.114.96.0/20 197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 104.16.0.0/13 104.24.0.0/14 172.64.0.0/13 131.0.72.0/22 2400:cb00::/32 2606:4700::/32 2803:f800::/32 2405:b500::/32 2405:8100::/32 2a06:98c0::/29 2c0f:f248::/32
+            header CF-Connecting-IP *
+        }
+        reverse_proxy @cloudflare 127.0.0.1:8900 {
+            header_up X-Forwarded-For {http.request.header.CF-Connecting-IP}
+        }
+        reverse_proxy 127.0.0.1:8900 {
+            header_up X-Forwarded-For {remote_host}
+        }
+        # forwarding-end
+    }
+}

@@ -1,0 +1,7 @@
+{
+  "source": "backup-reader@memory.example.com",
+  "ready_url": "https://memory.example.com/ready",
+  "directory": "/var/lib/waystone-offsite",
+  "identity_file": "/etc/waystone-offsite/id_ed25519",
+  "known_hosts": "/etc/waystone-offsite/known_hosts"
+}

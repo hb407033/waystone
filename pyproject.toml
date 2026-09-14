@@ -1,0 +1,42 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "waystone-memory"
+version = "0.5.0"
+description = "给团队 AI 编程助手用的共享项目记忆：先确认再共享，来源可追溯，换机器也能接着干"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+authors = [{ name = "hb407033" }]
+keywords = ["mcp", "ai-agents", "claude-code", "codex", "team-memory", "knowledge-management", "self-hosted"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Framework :: FastAPI",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development",
+]
+dependencies = ["fastapi>=0.115,<1", "uvicorn>=0.34,<1", "httpx>=0.28,<1", "mcp>=1.26,<2"]
+
+[project.optional-dependencies]
+test = ["pytest>=8,<10"]
+
+[project.urls]
+Homepage = "https://github.com/hb407033/waystone"
+Issues = "https://github.com/hb407033/waystone/issues"
+
+[project.scripts]
+waystone = "waystone.cli:main"
+waystone-mcp = "waystone.mcp_server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["waystone"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,23 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      # 预先拉取镜像，让 tests/test_proxy.py 在容器里实跑 Caddy 转发测试，而不是跳过。
+      - run: docker pull caddy:2
+      - run: uv sync --extra test
+      - run: uv run pytest -q
