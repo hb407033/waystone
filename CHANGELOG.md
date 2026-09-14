@@ -2,6 +2,12 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### 改进
+
+- Skill：任务告一段落时（用户拍板、完成交代的事、说收尾的话），Agent 主动整理已确认的结论作为候选记忆并询问是否保存，用户明确同意才发布。
+
 ## [0.5.0] - 2026-09-14
 
 首次开源发布。此前在小团队内部使用并迭代了四个版本。
