@@ -21,7 +21,7 @@ status：在目标目录执行 `waystone --directory <绝对目录> status`，�
 
 ## 初始化与加入
 
-- 用户明确要求创建项目：调用 project_init，参数为项目名称和实际工作目录。
+- 用户明确要求创建项目：先调用 project_list（CLI：`waystone projects`）。已有同名或名称相近（忽略引号、空格、大小写）的项目时，列出名称和 ID，询问用户是绑定已有项目还是确实另建，不直接创建；通过邀请加入的成员应绑定邀请所在的项目，不另建。用户确认新建后再调用 project_init，参数为项目名称和实际工作目录。
 - join：展示 `<服务地址>/invite`，让用户在浏览器接受邀请或注册；不要要求在聊天中提供邀请码或密码。用户完成后按上面的设备授权流程登录，再 project_list 选定项目并 project_bind。已有成员可直接列表并绑定；多个同名项目必须明确 ID，不擅自选择。
 - invite 邮箱：用户明确要求邀请时，在已绑定目录由 Agent 执行 `waystone --directory <目录> invite <邮箱>`，返回邀请链接给用户自行转交；不自动发送消息。
 - 已是成员、换工作目录：project_list 后 project_bind。绑定文件可入库，不能包含凭据。
@@ -70,8 +70,10 @@ memory_recall 使用当前项目目录和与任务相关的问题。展示关键
 
 - import：先 memory_preview，只传用户点名的文件；这是离线步骤。展示候选内容后等待用户确认，再逐条 memory_publish。
 - save：先形成简短、独立的候选事实并标注来源；只有用户明确授权发布具体内容后才调用 memory_publish。
+- 保存文档、导出资料或长篇笔记时先提炼再保存：挑出值得团队复用的事实（已拍板的决定、约定、数字口径、文件位置、待办），一条记忆只写一个事实，不看原文也能读懂；标题行、目录和过渡句不单独成条。不要把整篇文档按段落或字数切块上传：memory_preview 和 CLI save 会按空行和每 400 字把文件拆成多条主题带 `:序号` 的记录，句子可能被截断，拆出的结果只用来核对，不能原样发布。用 CLI save 时，候选文件只写一条事实，不含空行，不超过 400 字。
+- kind 按内容选择：decision 是已拍板的决定，convention 是约定和规范，background 是背景资料、数字口径和文件位置，handoff 是进度和待办；有截止时间的待办用 handoff，到期自动失效。memory_publish 不传 kind 时默认记为 decision，所以必须显式传入；CLI save 目前固定记为 decision、handoff 命令记为 handoff，需要 convention 或 background 时改用 memory_publish。
 - handoff：用 kind=handoff，记录任务进度、已验证证据、未完成事项和下一步；默认 7 天后不再召回。过期后再次确认保存相同内容会生成新记录和新有效期，旧记录保留。
-- topic 使用稳定名称（如 auth/session-policy），同一主题后续修订复用此名称；不要每次生成随机 topic。
+- topic 使用稳定名称（如 auth/session-policy），同一主题后续修订复用此名称；不要每次生成随机 topic，也不要在主题末尾加 `:1`、`:2` 这类序号。同一对象有多个事实时用下一级主题区分，如 `storage/database/engine` 与 `storage/database/backup-policy`。
 - 不上传密钥、个人闲聊、无关文件和未经确认的推测。预览和服务端发布都会拦截明显凭据（返回 400 时移除后重试），但自动扫描不能保证发现所有秘密，始终审阅上传内容。
 - retract：用户明确要求撤回某条误发记录时，先用 memory_entries 展示该记录并确认，再调用 memory_retract。正文会被永久抹除并删除向量，不可恢复；所有者或作者本人可操作。返回 index_status=purge_pending 时再次调用重试，仍不成功时告知项目所有者人工核对。撤回后再发布同主题内容会成为待确认提案。已生成的备份按保留期轮换后才会消失，需要彻底清除时告知项目所有者。
 
@@ -82,7 +84,7 @@ index_status=pending 表示内容已保存但尚未进入向量检索，使用 m
 
 ## 参数示例
 
-- init 官网改版：创建并绑定当前目录，不上传文件。
+- init 官网改版：先查有无同名项目，用户确认新建后创建并绑定当前目录，不上传文件。
 - join：打开邀请页面，完成授权后列出并绑定项目。
 - import README.md：离线预览该文件，确认后发布。
 - recall 登录方案：检索当前项目。
