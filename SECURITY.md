@@ -1,33 +1,33 @@
-# 安全策略
+# Security policy
 
-## 支持的版本
+## Supported versions
 
-| 版本 | 是否接收安全修复 |
+| Version | Receives security fixes |
 |---|---|
 | 0.6.x | ✅ |
 | 0.5.x | ❌ |
-| 更早版本 | ❌ |
+| Earlier versions | ❌ |
 
-## 如何报告漏洞
+## How to report a vulnerability
 
-请**不要**通过公开 Issue、讨论区或 Pull Request 报告安全问题。
+Please **do not** report security issues through public Issues, discussion boards, or Pull Requests.
 
-在本仓库页面进入 **Security → Report a vulnerability**，通过 GitHub 私密漏洞报告提交。请尽量包含：
+On this repo's page, go to **Security → Report a vulnerability** and submit through GitHub private vulnerability reporting. Please include where possible:
 
-- 受影响的版本和部署方式
-- 复现步骤或概念验证（请使用自己搭建的测试环境，不要攻击他人的部署）
-- 你判断的影响范围，例如越权读取其他项目、绕过提案审核、凭据泄露
+- Affected versions and deployment method
+- Reproduction steps or a proof of concept (use your own test environment — do not attack other people's deployments)
+- Your assessment of the impact, e.g. unauthorized reads across projects, bypassing proposal review, credential leaks
 
-我们会在 7 天内确认收到，并在修复发布后致谢报告者（如你愿意署名）。
+We'll acknowledge receipt within 7 days and credit the reporter after the fix is released (if you're willing to be named).
 
-## 重点关注的范围
+## In scope
 
-- 项目权限与跨项目隔离
-- 会话、邀请、设备授权流程
-- 绕过提案审核、撤回或过期规则的方式
-- 凭据、会话令牌或记忆内容泄露到日志、错误信息、向量库之外
-- 登录限流被绕过
+- Project permissions and cross-project isolation
+- Session, invitation, and device-authorization flows
+- Ways to bypass proposal review, retraction, or expiry rules
+- Credentials, session tokens, or memory content leaking into logs, error messages, or anywhere beyond the vector store
+- Login rate limiting being bypassed
 
-## 已知且已记录的边界
+## Known, documented limitations
 
-以下行为已在 README 的“安全模型与已知边界”中说明，单独报告不视为新漏洞：凭据检测只能拦截明显写法；撤回后已有备份和 Mem0 历史库仍可能保留原文；IPv6 客户端可在同一网段内更换地址绕过按 IP 限流；同一 Docker 网络内的其他容器可以直连服务并自带转发头。
+The following behaviors are already documented in the README's "security model and known limitations" section; reported on their own, these don't count as new vulnerabilities: credential detection only catches obvious patterns; after retraction, existing backups and Mem0's history store may still retain the original text; IPv6 clients can rotate addresses within the same subnet to bypass per-IP rate limiting; other containers on the same Docker network can reach the service directly with their own forwarding headers.

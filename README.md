@@ -2,7 +2,7 @@
   <img src="assets/logo.svg" alt="Waystone" width="360">
 </p>
 
-<p align="center"><strong>给团队 AI 编程助手用的共享项目记忆：先确认再共享，来源可追溯，换机器也能接着干。</strong></p>
+<p align="center"><strong>Shared team memory for AI coding assistants: confirmed before sharing, provenance-tracked, pick up where you left off on any machine.</strong></p>
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License: Apache-2.0"></a>
@@ -11,47 +11,47 @@
   <a href="https://github.com/hb407033/waystone/actions/workflows/tests.yml"><img src="https://github.com/hb407033/waystone/actions/workflows/tests.yml/badge.svg" alt="tests"></a>
 </p>
 
-Waystone 是路边的指路石。每个 Agent 把**经过人确认**的结论留成路标，下一台机器、下一个同事、下一个 Agent 沿着它继续走，不必从头摸索。
+A waystone is a roadside marker. Each agent leaves human-confirmed conclusions as waymarks, so the next machine, the next teammate, the next agent can follow them instead of rediscovering everything from scratch.
 
 ---
 
-## 为什么需要它
+## Why Waystone
 
-Claude Code、Codex 这类编程助手各有自己的原生记忆，但这些记忆**只在一台机器、一个人身上**：
+Coding assistants like Claude Code and Codex each have their own native memory, but that memory **lives on one machine, with one person**:
 
-- 换一台电脑继续昨天的任务，得把背景重新讲一遍；
-- 同事的 Agent 不知道团队已经定下的架构决定，照自己的理解重做；
-- 直接把对话丢进向量库，又会混进没确认的猜测、过期的交接和误贴的密钥，还分不清谁有权修改。
+- Switch to another computer to pick up yesterday's task and you have to re-explain all the context;
+- A colleague's agent doesn't know the architecture decisions the team already made and redoes the work its own way;
+- Dump raw conversation into a vector store and unverified guesses, stale handoffs, and accidentally pasted secrets get mixed in — with no clear sense of who is allowed to change what.
 
-Waystone 在它们中间加了一层**有权限、有审核、有来源**的团队记忆服务。它不替代 `CLAUDE.md` / `AGENTS.md` 这类规则文件，也不改写各 Agent 的原生记忆；召回的内容只是带来源的参考资料。
+Waystone adds a layer of **permissioned, reviewed, provenance-tracked** team memory between them. It doesn't replace rules files like `CLAUDE.md` / `AGENTS.md`, and it doesn't rewrite any agent's native memory; recalled content is just provenance-attributed reference material.
 
-## 核心特性
+## Key features
 
-| 能力 | 说明 |
+| Capability | Description |
 |---|---|
-| 按项目隔离 | 每个项目独立成员与权限：所有者（owner）、协作者（collaborator）、只读（reader）；移除成员立即失去访问 |
-| 先确认再发布 | 导入文件先在本地离线预览；发布时客户端和服务端都拦截明显的凭据 |
-| 修改走提案 | 同一主题、同一环境和分支的新内容成为**待确认提案**，由所有者采纳、重新提交或拒绝，不会“后写的覆盖先写的”，历史全部保留 |
-| 适用范围 | 每条记忆可标注环境（prod/dev）、适用分支、来源版本；查询时先按范围筛选再检索 |
-| 交接记录 | `handoff` 类记忆记录进度、证据和下一步，默认 7 天后不再召回；到期的提案自动失效 |
-| 撤回 | 误发内容可撤回：抹掉正文、删除向量，保留主题、作者、时间和审计；所有者或作者本人可操作 |
-| 可恢复的检索 | SQLite 是唯一权威数据源，向量索引（自托管 Mem0）可随时全量重建；向量结果回 SQL 再核对项目和状态，不会串项目 |
-| Agent 友好 | stdio MCP 工具 + 命令行 + Agent Skill；浏览器设备码登录，Agent 全程接触不到密码 |
-| 运维闭环 | 就绪探针会真实查询向量库；登录按真实来源 IP 限流（兼容 Cloudflare）；审计日志；定时备份、恢复演练与异地拉取脚本 |
+| Per-project isolation | Independent members and permissions per project: owner, collaborator, reader; a removed member loses access immediately |
+| Confirmed before publishing | Imported files are previewed locally offline first; both client and server block obvious credentials at publish time |
+| Changes go through proposals | New content on the same topic, environment, and branch becomes a **pending proposal** that an owner accepts, rebases, or rejects — newer writes never silently overwrite older ones, and the full history is kept |
+| Scope | Each memory can be tagged with an environment (prod/dev), applicable branch, and source version; queries filter by scope before searching |
+| Handoffs | `handoff` memories record progress, evidence, and next steps; they stop being recalled after 7 days by default; expired proposals lapse automatically |
+| Retraction | Accidentally published content can be retracted: the body is wiped, the vector is deleted, and topic, author, timestamp, and audit trail are kept; the owner or the original author can do this |
+| Recoverable search | SQLite is the single source of truth; the vector index (self-hosted Mem0) can be fully rebuilt at any time; vector results are cross-checked back against SQL for project and status — no cross-project leakage |
+| Agent friendly | stdio MCP tools + CLI + an Agent Skill; browser device-code login, so agents never touch a password |
+| Operational closure | The readiness probe queries the vector store for real; login is rate-limited by real source IP (Cloudflare-compatible); audit log; scheduled backups, restore drills, and off-site pull scripts |
 
-## 架构
+## Architecture
 
 <p align="center">
-  <img src="assets/architecture.svg" alt="Waystone 架构：成员电脑上的 Agent 通过 MCP 或 CLI 经反向代理访问 Waystone 服务，服务以 SQLite 为权威数据源，以自托管 Mem0 做可重建的向量检索" width="100%">
+  <img src="assets/architecture.svg" alt="Waystone architecture: agents on member machines reach the Waystone service through MCP or CLI via a reverse proxy; the service uses SQLite as the authoritative data source and self-hosted Mem0 for rebuildable vector search" width="100%">
 </p>
 
-一次召回的顺序：先用 SQL 按成员权限和适用范围筛出候选记录 → 只在候选记录里做向量检索 → 结果回 SQL 复核项目归属、状态和有效期 → 返回给 Agent，并附上待处理的冲突提案和“未注明范围”的提示。
+A recall flows in this order: SQL first narrows the candidate records by member permissions and scope → vector search runs only within those candidates → results are checked back against SQL for project ownership, status, and validity period → the results are returned to the agent, along with any pending conflicting proposals and a note about memories with unspecified scope.
 
-## 快速开始
+## Quick start
 
-### 1. 部署服务端
+### 1. Deploy the server
 
-前置条件：Linux 服务器、Docker、一个自托管的 [Mem0](https://docs.mem0.ai/open-source/setup)（官方服务，已创建管理员并生成服务用 API Key）、一个能签发 HTTPS 证书的域名。
+Prerequisites: a Linux server, Docker, a self-hosted [Mem0](https://docs.mem0.ai/open-source/setup) (official service, with an admin created and a service API key generated), and a domain that can get an HTTPS certificate.
 
 ```bash
 git clone https://github.com/hb407033/waystone.git
@@ -59,30 +59,30 @@ cd waystone
 docker build -t waystone:0.5.0 .
 ```
 
-把 Mem0 服务 API Key 保存到 `deploy/secrets/mem0_key`（权限 600，不要提交到 Git），按实际情况修改 `deploy/compose.yaml` 里的 Mem0 地址和 Docker 网络名，然后启动：
+Save the Mem0 service API key to `deploy/secrets/mem0_key` (mode 600, do not commit to Git), edit the Mem0 address and Docker network name in `deploy/compose.yaml` to match your setup, then start:
 
 ```bash
 docker compose -f deploy/compose.yaml up -d
 ```
 
-服务只监听宿主机 `127.0.0.1:8900`。参考 [`deploy/Caddyfile.example`](deploy/Caddyfile.example) 配置反向代理和域名，确认就绪：
+The service only listens on the host's `127.0.0.1:8900`. See [`deploy/Caddyfile.example`](deploy/Caddyfile.example) to configure the reverse proxy and domain, then verify it's ready:
 
 ```bash
 curl https://memory.example.com/ready
 ```
 
-完整的部署、备份、监测与恢复说明见 [docs/operations.md](docs/operations.md)。
+Full deployment, backup, monitoring, and recovery instructions are in [docs/operations.md](docs/operations.md).
 
-### 2. 安装客户端
+### 2. Install the client
 
 ```bash
 uv tool install "git+https://github.com/hb407033/waystone@v0.5.0"
 waystone login --server https://memory.example.com
 ```
 
-`login` 会打印一个浏览器授权链接，在浏览器里核对设备并登录即可。第一次使用由 Mem0 管理员账号登录；其他成员通过邀请链接注册自己的账号，之后同样可以创建项目。
+`login` prints a browser authorization link; review the device in the browser and sign in. The first login should use the Mem0 admin account; other members register their own accounts via invite links, after which they can also create projects.
 
-### 3. 接入 Agent
+### 3. Connect your agents
 
 ```bash
 # Claude Code
@@ -91,89 +91,89 @@ claude mcp add --scope user --transport stdio waystone -- waystone-mcp
 codex mcp add waystone -- waystone-mcp
 ```
 
-把 [`skills/waystone/SKILL.md`](skills/waystone/SKILL.md) 放到 `~/.claude/skills/waystone/`（Codex、Pi 放到 `~/.agents/skills/waystone/`）。给 Agent 执行的逐步安装说明见 [docs/install.md](docs/install.md)。
+Copy [`skills/waystone/SKILL.md`](skills/waystone/SKILL.md) to `~/.claude/skills/waystone/` (for Codex and Pi, `~/.agents/skills/waystone/`). Step-by-step installation instructions for agents are in [docs/install.md](docs/install.md).
 
-### 4. 在项目里使用
+### 4. Use it in a project
 
 ```bash
 cd your-repo
-waystone init "官网改版"                 # 创建项目并绑定当前目录，不上传任何文件
-waystone invite colleague@example.com    # 生成邀请链接，由你转交
-waystone import README.md --preview-only # 离线预览，确认后去掉 --preview-only 发布
-waystone recall "登录模块有哪些已确认的决定？"
+waystone init "Website Redesign"        # Create a project and bind the current directory; nothing is uploaded
+waystone invite colleague@example.com  # Generate an invite link and pass it along
+waystone import README.md --preview-only # Offline preview; drop --preview-only to publish after review
+waystone recall "What decisions about the login module have been confirmed?"
 ```
 
-也可以直接对 Agent 说：“把刚才确认的数据库选型存进项目记忆”“接手 task-123 前先查一下项目记忆”。
+Or just tell your agent: "Save the database choice we just confirmed into project memory" or "Check the project memory before picking up task-123."
 
-## MCP 工具
+## MCP tools
 
-| 工具 | 作用 |
+| Tool | Purpose |
 |---|---|
-| `project_list` / `project_init` / `project_bind` | 列出、创建、绑定项目 |
-| `memory_preview` | 离线预览要导入的 Markdown/TXT，不上传 |
-| `memory_recall` | 按问题、环境、分支召回有效记忆 |
-| `memory_publish` | 用户确认内容后发布一条记忆 |
-| `memory_entries` | 分页查看全部记录、提案与历史 |
-| `memory_resolve` / `memory_rebase` / `memory_reject` | 所有者处理冲突提案 |
-| `memory_retract` | 撤回误发内容 |
-| `memory_reindex` | 分批修复或全量重建向量索引 |
+| `project_list` / `project_init` / `project_bind` | List, create, and bind projects |
+| `memory_preview` | Preview the Markdown/TXT to import offline, without uploading |
+| `memory_recall` | Recall valid memories by question, environment, and branch |
+| `memory_publish` | Publish a memory after the user confirms the content |
+| `memory_entries` | Page through all records, proposals, and history |
+| `memory_resolve` / `memory_rebase` / `memory_reject` | Owner handles conflicting proposals |
+| `memory_retract` | Retract accidentally published content |
+| `memory_reindex` | Repair or fully rebuild the vector index in batches |
 
-登录、加入项目等涉及凭据的操作只能通过命令行和浏览器完成，不开放给模型调用。
+Operations involving credentials — login, joining a project, and the like — can only be done from the command line and the browser, never through model calls.
 
-**远程连接器**：服务端设置 `PUBLIC_URL` 后，同一组工具（不含 `project_init`、`project_bind`、`memory_preview`，改用必填的 `project_id`）也通过 `<服务地址>/mcp` 以 Streamable HTTP 提供，鉴权为 OAuth（动态客户端注册 + PKCE，刷新令牌轮换）。Claude 网页、Desktop、Cowork、手机、Claude Code、Codex 都能直接连接，不必在本机安装客户端。详见 [docs/operations.md](docs/operations.md#远程连接器oauth)。
+**Remote connector**: after setting `PUBLIC_URL` on the server, the same set of tools (minus `project_init`, `project_bind`, and `memory_preview`, with `project_id` required instead) is also served over Streamable HTTP at `<server address>/mcp`, authenticated via OAuth (dynamic client registration + PKCE, refresh token rotation). Claude web, Desktop, Cowork, mobile, Claude Code, and Codex can all connect directly, no local client installation needed. See [docs/operations.md](docs/operations.md#remote-connector-oauth).
 
-## 配置
+## Configuration
 
-| 环境变量 | 位置 | 说明 |
+| Variable | Where | Description |
 |---|---|---|
-| `WAYSTONE_DB` | 服务端 | SQLite 路径，默认 `/data/waystone.sqlite` |
-| `MEM0_URL` | 服务端 | Mem0 服务地址 |
-| `MEM0_KEY_FILE` | 服务端 | Mem0 API Key 文件路径 |
-| `FORWARDED_ALLOW_IPS` | 服务端 | uvicorn 信任的转发来源，配合反向代理按真实 IP 限流 |
-| `PUBLIC_URL` | 服务端 | 对外地址（origin），设置后启用远程连接器与 OAuth 授权服务 |
-| `OAUTH_EXTRA_REDIRECT_URIS` | 服务端 | 额外允许的 OAuth 回调地址，逗号分隔、逐字匹配 |
-| `OAUTH_MAX_PENDING_CLIENTS` | 服务端 | 未产生令牌的已注册客户端上限，默认 500 |
-| `WAYSTONE_SERVER` | 客户端 | 服务地址；也可以在 `waystone login --server` 时指定并保存到本机会话 |
-| `WAYSTONE_PROFILE` | 客户端 | 本机会话文件路径，默认 `~/.config/waystone/session.json`（权限 600） |
-| `WAYSTONE_TRUST_ENV` | 客户端 | 设为 `1` 时读取 `HTTPS_PROXY`、`SSL_CERT_FILE` 等代理与证书环境变量 |
+| `WAYSTONE_DB` | Server | SQLite path, default `/data/waystone.sqlite` |
+| `MEM0_URL` | Server | Mem0 service address |
+| `MEM0_KEY_FILE` | Server | Mem0 API key file path |
+| `FORWARDED_ALLOW_IPS` | Server | Forwarding sources trusted by uvicorn; used with the reverse proxy to rate-limit by real source IP |
+| `PUBLIC_URL` | Server | Public address (origin); enables the remote connector and OAuth authorization service once set |
+| `OAUTH_EXTRA_REDIRECT_URIS` | Server | Additional allowed OAuth redirect URIs, comma-separated, matched verbatim |
+| `OAUTH_MAX_PENDING_CLIENTS` | Server | Cap on registered clients that haven't produced a token yet, default 500 |
+| `WAYSTONE_SERVER` | Client | Server address; can also be set and saved to the local session via `waystone login --server` |
+| `WAYSTONE_PROFILE` | Client | Local session file path, default `~/.config/waystone/session.json` (mode 600) |
+| `WAYSTONE_TRUST_ENV` | Client | Set to `1` to read proxy and certificate environment variables like `HTTPS_PROXY` and `SSL_CERT_FILE` |
 
-## 安全模型与已知边界
+## Security model and known limitations
 
-我们尽量把“能做到什么、做不到什么”写清楚：
+We try to be explicit about what this can and cannot do:
 
-- **信任边界**：所有权限判断都在服务端完成；仓库里的绑定文件 `.waystone.json` 只记录项目 ID 和服务地址，不能授予权限，也不能把会话令牌引到别的服务器。
-- **记忆不是指令**：召回结果明确标注为参考资料，不能覆盖用户要求、规则文件或工具权限。但共享记忆仍可能成为跨机器传播错误信息的通道，发布前请人工审阅。
-- **凭据检测是辅助**：只拦截明显的密钥写法，不能保证发现所有秘密。
-- **撤回的残留**：撤回会抹掉数据库正文并删除向量，但已生成的备份要到保留期后才轮换掉，Mem0 自身的历史库也可能留有原文，需要运维清理。
-- **远程连接器**：授权页上的应用名称由客户端自报、无法验证；只批准自己刚发起的连接。远程授权可用 `waystone connections` / `disconnect` 查看和撤销。
-- **会话**：30 天内有使用自动续期，不设绝对上限；`logout` 只撤销当前会话。
-- **目前不支持**：高可用多实例、项目所有者转让、命令行会话列表与远程吊销、改密码、跨主题的语义矛盾识别。
-- **限流**：按单个来源 IP 计数；IPv6 客户端可以在同一网段内更换地址。
+- **Trust boundary**: all permission checks happen server-side; the binding file `.waystone.json` in a repository only records the project ID and server address — it grants no permissions and cannot redirect a session token to another server.
+- **Memories are not instructions**: recalled results are clearly labeled as reference material and cannot override user requests, rules files, or tool permissions. But shared memory can still spread misinformation across machines, so review content before publishing.
+- **Credential detection is best-effort**: it only catches obvious key formats; it cannot guarantee every secret is found.
+- **Retraction residue**: retraction wipes the database body and deletes the vector, but generated backups aren't rotated out until the retention period passes, and Mem0's own history store may still hold the original text — this needs operational cleanup.
+- **Remote connector**: the application name on the consent page is self-reported by the client and cannot be verified; only approve connections you just initiated. Remote authorizations can be listed and revoked with `waystone connections` / `disconnect`.
+- **Sessions**: sessions auto-renew with use within 30 days, with no absolute cap; `logout` only revokes the current session.
+- **Not currently supported**: highly-available multi-instance deployment, project ownership transfer, CLI session listing and remote revocation, password changes, cross-topic semantic contradiction detection.
+- **Rate limiting**: counted per source IP; IPv6 clients can rotate addresses within the same subnet.
 
-与 Agent 原生记忆如何分工，见 [docs/memory-coexistence.md](docs/memory-coexistence.md)。安全问题请按 [SECURITY.md](SECURITY.md) 私下报告。
+For how this divides labor with agent native memory, see [docs/memory-coexistence.md](docs/memory-coexistence.md). Please report security issues privately following [SECURITY.md](SECURITY.md).
 
-## 开发
+## Development
 
 ```bash
 uv sync --extra test
 uv run pytest -q
 ```
 
-测试覆盖权限与跨项目隔离、提案状态流转、撤回与向量清理、限流来源 IP（本机有 Docker 和 `caddy:2` 镜像时会在容器里实跑 Caddy）、真实 stdio MCP 到 HTTP 的往返。`deploy/smoke.py` 用于在服务器上连真实 Mem0 做隔离验收，并清理本次测试产生的向量。
+Tests cover permissions and cross-project isolation, proposal state transitions, retraction and vector cleanup, rate-limit source IP (when Docker and the `caddy:2` image are available locally, Caddy actually runs in a container), and a real stdio-MCP-to-HTTP round trip. `deploy/smoke.py` performs isolated acceptance testing on the server against a real Mem0 and cleans up the vectors produced by the test run.
 
-## 路线图
+## Roadmap
 
-- 项目所有者转让与增补
-- 会话列表、远程吊销与改密码
-- 可选的内置向量索引，去掉对独立 Mem0 服务的依赖
-- 同主题语义矛盾提示
-- 发布到 PyPI（包名 `waystone-memory`）
-- 英文文档
+- Project ownership transfer and additions
+- Session list, remote revocation, and password changes
+- Optional built-in vector index, removing the dependency on a standalone Mem0 service
+- Same-topic semantic contradiction hints
+- Publish to PyPI (package name `waystone-memory`)
+- English documentation
 
-## 参与贡献
+## Contributing
 
-欢迎提交 Issue 和 Pull Request，流程见 [CONTRIBUTING.md](CONTRIBUTING.md)。版本变化见 [CHANGELOG.md](CHANGELOG.md)。
+Issues and pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md) for the process. Version changes are in [CHANGELOG.md](CHANGELOG.md).
 
-## 许可证
+## License
 
 [Apache License 2.0](LICENSE)

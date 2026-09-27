@@ -1,11 +1,11 @@
-# Waystone 与原生记忆的共存规则
+# Coexistence rules: Waystone and native memory
 
-原生记忆保留个人经验，仓库文件维护正式规则，共享库维护有来源的团队知识。不自动双向同步，Agent 需按 Skill 核对冲突。
+Native memory keeps personal experience, repo files maintain official rules, and the shared library maintains provenance-tracked team knowledge. No automatic two-way sync; agents resolve conflicts per the skill.
 
-新增 environment、branch、source_version，旧记录保留原文与主题并留空新字段。同主题同环境同分支唯一 active；去重包含规范主题、范围、来源版本与内容。新主题统一 NFKC、小写、斜杠空白和单段空格；旧主题按规范名称匹配但不重写；多个有效别名时拒绝自动选择。
+New environment, branch, and source_version fields are added; old records keep their original text and topic with the new fields empty. Only one active record per topic/environment/branch; deduplication considers the canonical topic, scope, source version, and content. New topics are normalized (NFKC, lowercase, whitespace trimmed around slashes, collapsed internal whitespace); old topics match by canonical name but are not rewritten; automatic selection is refused when multiple valid aliases exist.
 
-查询先经项目 ACL 和 SQL 状态检查，再区分匹配、未注明范围、同范围待处理提案。未填写范围的查询会返回范围警告。不是语义矛盾检测，也不保证选出唯一事实。环境和分支是适用范围，不是权限隔离；项目成员权限仍由项目 ACL 决定。
+Queries first pass project ACL and SQL status checks, then distinguish matched records, unspecified-scope records, and pending proposals in the same scope. Queries without a scope return a scope warning. This is not semantic contradiction detection, and it doesn't guarantee a single winning fact. Environment and branch define scope, not access isolation; member permissions are still governed by the project ACL.
 
-检索先从 SQL 选择有效范围，再按候选 ID 分批向量检索，使用正确的 top_k 参数并合并相关性结果。新 entries/page 和 reindex 提供游标，客户端必须继续 next_cursor 直到为空。full 重建仅所有者可调用；可补齐丢失向量。旧 proposals 可经所有者核对后 rebase 到当前有效版本，或 reject；均保留审计。过期交接重存生成新版本。
+Retrieval first selects the valid scope from SQL, then runs vector search in batches by candidate ID with the correct top_k, merging results by relevance. New entries/page and reindex return cursors; clients must follow next_cursor until empty. Full rebuilds are owner-only and backfill missing vectors. Old proposals can be rebased onto the current active version after owner review, or rejected; both keep an audit trail. Re-saving an expired handoff creates a new version.
 
-数据库升级增加三列并用范围索引替换旧主题索引，保留旧内容和 ID。部署前暂停本服务并使用 SQLite backup 保存一致快照。回退必须同时恢复旧镜像和升级前数据库，不能只回退镜像；升级后的写入必须先导出保留，再安排回退，不能直接丢弃。
+The database upgrade adds three columns and replaces the old topic index with a scope index, keeping old content and IDs. Pause this service before deploying and take a consistent snapshot with the SQLite backup API. Rollback must restore both the old image and the pre-upgrade database — never just the image; post-upgrade writes must be exported and preserved before rolling back, never discarded outright.

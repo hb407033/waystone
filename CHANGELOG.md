@@ -1,59 +1,59 @@
-# 更新日志
+# Changelog
 
-格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
+Formatted per [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/lang/zh-CN/).
 
 ## [Unreleased]
 
 ## [0.6.2] - 2026-09-27
 
-### 改进
+### Improved
 
-- 客户端在进程内复用连接，空闲保留 120 秒；常驻的 MCP 服务连续调用不再每次做 TLS 握手。
+- The client reuses connections in-process, keeping them idle for 120 seconds; long-running MCP services no longer do a TLS handshake on every call.
 
 ## [0.6.1] - 2026-09-27
 
-### 改进
+### Improved
 
-- 召回只调用一次向量检索；冲突提示只查询待确认提案。发布前查重不再用正文计算向量；服务端复用到 Mem0 的连接。
-- 撤回与索引改为按记录加锁，Mem0 卡住时不再阻塞所有写操作。
-- `/ready` 成功结果缓存 30 秒、并发共用一次探测；容器健康检查改用 `/health`，日志按 10 MB × 3 轮转，httpx 日志降到警告级别。
-- 会话 30 天内有使用自动续期；过期提示直接给出重新登录命令。
-- 客户端连接超时 5 秒、等待响应 30 秒（重建与撤回 120 秒），写请求超时提示“结果未确认”；设备登录轮询遇网络抖动继续等待。
-- 设备授权页打开时自动核对请求设备；未核对就提交时先展示设备并要求再点一次，批准的是核对过的授权码。
-- 运维文档说明 Mem0 普通 API Key 的 bcrypt 校验开销，建议改用 `ADMIN_API_KEY`。
+- Recall now performs a single vector search; conflict prompts only query pending proposals. Pre-publish duplicate checks no longer embed the body text; the server reuses its connection to Mem0.
+- Retraction and indexing now lock per record, so a stalled Mem0 no longer blocks all writes.
+- `/ready` caches successful results for 30 seconds; concurrent requests share one probe; container health checks now use `/health`, logs rotate at 10 MB × 3, and httpx logging is dropped to warning level.
+- Sessions auto-renew with use within 30 days; expiry messages include the re-login command directly.
+- Client timeouts: 5s to connect, 30s for responses (120s for rebuilds and retractions); write timeouts report "result unconfirmed"; device login polling keeps waiting through network jitter.
+- The device authorization page auto-verifies the requesting device on open; submitting without verification first shows the device and asks for a second confirmation, and the approval applies to the verified authorization code.
+- Ops docs describe the bcrypt verification overhead of Mem0's regular API keys; recommend switching to `ADMIN_API_KEY`.
 
 ## [0.6.0] - 2026-09-15
 
-### 功能
+### Added
 
-- 远程 MCP 连接器：设置 `PUBLIC_URL` 后，Claude 网页、Desktop、Cowork、手机、Claude Code、Codex 可通过 `<服务地址>/mcp` 直接使用，鉴权为 OAuth（动态客户端注册，一律按公共客户端；PKCE S256；刷新令牌按家族轮换，重放作废整个家族）。
-- 授权页显示应用自报名称（未经验证）、回调地址和权限范围；回调只允许 Claude 托管回调、本机回环地址和显式配置的地址。
-- `waystone connections` / `waystone disconnect` 查看和撤销远程授权；授权批准、拒绝、重放、撤销、断开写入审计。
-- 注册、令牌、授权接口按来源 IP 限流，待授权客户端与授权请求设总量上限。
+- Remote MCP connector: with `PUBLIC_URL` set, Claude web, Desktop, Cowork, mobile, Claude Code, and Codex can connect directly via `<server>/mcp`, authenticating with OAuth (dynamic client registration, always treated as public clients; PKCE S256; refresh tokens rotate by family, and replay invalidates the entire family).
+- The authorization page shows the app's self-reported name (unverified), callback address, and permission scopes; callbacks are restricted to Claude-hosted callbacks, local loopback addresses, and explicitly configured addresses.
+- `waystone connections` / `waystone disconnect` list and revoke remote authorizations; authorization approval, rejection, replay, revocation, and disconnection are written to the audit trail.
+- Registration, token, and authorization endpoints are rate-limited by source IP, with global caps on pending clients and authorization requests.
 
-### 改进
+### Improved
 
-- Skill：任务告一段落时（用户拍板、完成交代的事、说收尾的话），Agent 主动整理已确认的结论作为候选记忆并询问是否保存，用户明确同意才发布。
-- Skill：创建项目前先列出已加入的项目，发现同名或名称相近的项目时询问是绑定还是另建，避免受邀成员误建重复项目。
-- Skill：保存文档类资料时先提炼成可独立理解的事实再逐条保存，标题行不单独成条，主题不带序号，按内容显式选择 kind，不再整篇按段落或字数切块上传。
+- Skill: when wrapping up (the user makes a call, finishes an assigned task, or says winding-down remarks), the agent proactively organizes confirmed conclusions into candidate memories and asks whether to save them, publishing only with explicit user consent.
+- Skill: before creating a project, list joined projects; when a same or similar name exists, ask whether to bind it or create a new one, so invited members don't accidentally create duplicate projects.
+- Skill: when saving documents, first distill them into self-contained facts and save them one by one; headings don't become standalone entries, topics carry no numeric suffixes, choose kind explicitly by content, and no longer upload the whole document chunked by paragraph or character count.
 
 ## [0.5.0] - 2026-09-14
 
-首次开源发布。此前在小团队内部使用并迭代了四个版本。
+First open-source release. Previously used and iterated internally by a small team over four versions.
 
-### 功能
+### Added
 
-- 按项目隔离的团队记忆服务：所有者、协作者、只读三种角色；邀请链接注册；浏览器设备码登录。
-- 发布前本地离线预览；客户端与服务端同时拦截明显凭据（兼容 JSON/YAML 写法，扫描全部文本字段）。
-- 同主题、同环境、同分支的修改成为待确认提案，由所有者采纳、重新提交或拒绝；拒绝为终态。
-- 适用范围：环境、适用分支、来源版本；召回先按权限和范围筛选候选，再在候选内向量检索，结果回 SQL 复核。
-- `handoff` 交接记录默认 7 天过期；到期的有效记录和提案自动失效，过期审计记为 `system`。
-- 撤回误发内容：抹掉正文、替换内容哈希、删除向量（删除前记录向量 ID，删完复查，归属不一致时不删）；撤回后同主题重新发布仍需所有者确认。
-- 归档项目仍可重建检索索引。
-- stdio MCP 工具 12 个、命令行、Agent Skill。
-- 登录按真实来源 IP 限流，Caddy 配置兼容 Cloudflare 并防止伪造转发头。
-- 就绪探针、定时备份、隔离恢复演练、异地拉取与邮件告警脚本。
+- Per-project isolated team memory service: three roles — owner, collaborator, read-only; invitation-link signup; browser device-code login.
+- Local offline preview before publishing; both client and server block obvious credentials (tolerates JSON/YAML styles, scans all text fields).
+- Edits to the same topic, environment, and branch become pending proposals for the owner to accept, rebase, or reject; rejection is a terminal state.
+- Scope: environment, applicable branch, source version; recall first filters candidates by permission and scope, then runs vector search within the candidates, verifying results back in SQL.
+- `handoff` records expire by default after 7 days; expired active records and proposals are automatically invalidated, and the expiry audit is recorded as `system`.
+- Retract mistakenly published content: wipe the body, replace the content hash, delete vectors (record vector IDs before deletion, verify afterward, skip deletion on ownership mismatch); republishing the same topic after retraction still requires owner confirmation.
+- Archived projects can still rebuild their search indexes.
+- 12 stdio MCP tools, a CLI, and an Agent Skill.
+- Logins rate-limited by real source IP; Caddy config is Cloudflare-compatible and prevents forged forwarding headers.
+- Readiness probe, scheduled backups, isolated recovery drills, off-site pulls, and email alert scripts.
 
-### 说明
+### Notes
 
-- 客户端不内置默认服务地址：`waystone login` 必须显式传 `--server`，或设置 `WAYSTONE_SERVER`。
+- The client ships with no default server address: `waystone login` requires an explicit `--server`, or set `WAYSTONE_SERVER`.
