@@ -1,11 +1,24 @@
 """服务端 Mem0 适配；成员永远拿不到此服务凭据。"""
 from pathlib import Path
+import logging
+import threading
 import httpx
 
+# httpx 在 INFO 级别记录每个请求；健康检查和检索会把服务日志刷满，只保留警告以上。
+logging.getLogger('httpx').setLevel(logging.WARNING)
+
 class Mem0Backend:
-    def __init__(self,url,key_file):
+    def __init__(self,url,key_file,transport=None):
         self.url=url.rstrip('/')
-        self.key_file=key_file
+        self.key_file=key_file;self.transport=transport;self._http=None;self._key=None;self._lock=threading.Lock()
+
+    def http(self):
+        # 复用同一个连接池（httpx.Client 线程安全）；Key 在首次调用 Mem0 时读取一次，之后换 Key 需要重启服务。
+        with self._lock:
+            if self._http is None:
+                self._key=Path(self.key_file).read_text().strip()
+                self._http=httpx.Client(timeout=20,trust_env=False,transport=self.transport,headers={'X-API-Key':self._key})
+            return self._http
 
     def authenticate_admin(self,email,password):
         with httpx.Client(timeout=20,trust_env=False) as c:
@@ -17,23 +30,19 @@ class Mem0Backend:
             return r.json()
 
     def request(self,path,data,timeout=20):
-        key=Path(self.key_file).read_text().strip()
-        with httpx.Client(timeout=timeout,trust_env=False) as c:
-            r=c.post(self.url+path,json=data,headers={'X-API-Key':key})
-            r.raise_for_status()
-            return r.json()
+        r=self.http().post(self.url+path,json=data,timeout=timeout)
+        r.raise_for_status()
+        return r.json()
 
     def delete_vector(self,vector_id):
-        key=Path(self.key_file).read_text().strip()
-        with httpx.Client(timeout=20,trust_env=False) as c:
-            c.delete(self.url+'/memories/'+vector_id,headers={'X-API-Key':key}).raise_for_status()
+        self.http().delete(self.url+'/memories/'+vector_id).raise_for_status()
 
     def namespace(self,project):return 'waystone:'+project
 
     def index(self,project,entry):
         ns=self.namespace(project)
-        # 若上次提交成功但响应丢失，先按唯一记录 ID 查回，避免重试重复写入。
-        existing=self.request('/search',{'query':entry['content'],'filters':{'user_id':ns,'gateway_entry_id':entry['id']},'top_k':1})
+        # 若上次提交成功但响应丢失，先按唯一记录 ID 查回，避免重试重复写入；命中范围由 gateway_entry_id 过滤决定，查询词只是占位，不把正文拿去算向量。
+        existing=self.request('/search',{'query':'index dedupe','filters':{'user_id':ns,'gateway_entry_id':entry['id']},'top_k':1})
         if existing.get('results'):return
         self.request('/memories',{'messages':[{'role':'user','content':entry['content']}],
             'user_id':ns,'infer':False,'metadata':{'gateway_entry_id':entry['id'],'project_id':project,

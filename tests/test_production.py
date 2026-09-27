@@ -247,3 +247,41 @@ def test_resolve_without_current_version_requires_explicit_null(system):
     path=f'/projects/{p}/entries/{pb["id"]}/resolve'
     assert c.post(path,json={}).status_code==409
     assert c.post(path,json={'expected_id':None}).json()['status']=='active'
+
+
+def test_ready_caches_success_only(system):
+    c,b,_=system;n=[0]
+    def ok():n[0]+=1
+    b.ready=ok
+    assert c.get('/ready').status_code==200 and c.get('/ready').status_code==200 and n[0]==1
+
+def test_compose_uses_light_healthcheck_and_log_rotation():
+    from pathlib import Path
+    t=(Path(__file__).resolve().parents[1]/'deploy/compose.yaml').read_text()
+    assert '127.0.0.1:8900/health' in t and '8900/ready' not in t
+    assert "max-size: '10m'" in t and "max-file: '3'" in t
+
+def test_ready_cache_expires_and_failure_is_not_cached(system,monkeypatch):
+    import waystone.api as api
+    c,b,_=system;now=[1000.0];n=[0]
+    monkeypatch.setattr(api.time,'monotonic',lambda:now[0])
+    def ok():n[0]+=1
+    b.ready=ok
+    assert c.get('/ready').status_code==200 and c.get('/ready').status_code==200 and n[0]==1
+    now[0]+=31
+    b.ready=lambda:(_ for _ in ()).throw(RuntimeError('offline'))
+    assert c.get('/ready').status_code==503
+    b.ready=ok
+    assert c.get('/ready').status_code==200 and n[0]==2
+
+def test_ready_waiters_share_one_failed_probe(system):
+    import threading
+    c,b,_=system;n=[0];gate=threading.Barrier(4)
+    def slow_fail():
+        n[0]+=1;time.sleep(0.2);raise RuntimeError('offline')
+    b.ready=slow_fail
+    codes=[]
+    def hit():gate.wait();codes.append(c.get('/ready').status_code)
+    threads=[threading.Thread(target=hit) for _ in range(4)]
+    [t.start() for t in threads];[t.join(10) for t in threads]
+    assert codes==[503]*4 and n[0]==1

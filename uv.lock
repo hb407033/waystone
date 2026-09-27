@@ -797,7 +797,7 @@ wheels = [
 
 [[package]]
 name = "waystone-memory"
-version = "0.5.0"
+version = "0.6.2"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
@@ -815,7 +815,7 @@ test = [
 requires-dist = [
     { name = "fastapi", specifier = ">=0.115,<1" },
     { name = "httpx", specifier = ">=0.28,<1" },
-    { name = "mcp", specifier = ">=1.26,<2" },
+    { name = "mcp", specifier = ">=1.30,<2" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8,<10" },
     { name = "uvicorn", specifier = ">=0.34,<1" },
 ]

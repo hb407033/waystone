@@ -120,6 +120,8 @@ waystone recall "登录模块有哪些已确认的决定？"
 
 登录、加入项目等涉及凭据的操作只能通过命令行和浏览器完成，不开放给模型调用。
 
+**远程连接器**：服务端设置 `PUBLIC_URL` 后，同一组工具（不含 `project_init`、`project_bind`、`memory_preview`，改用必填的 `project_id`）也通过 `<服务地址>/mcp` 以 Streamable HTTP 提供，鉴权为 OAuth（动态客户端注册 + PKCE，刷新令牌轮换）。Claude 网页、Desktop、Cowork、手机、Claude Code、Codex 都能直接连接，不必在本机安装客户端。详见 [docs/operations.md](docs/operations.md#远程连接器oauth)。
+
 ## 配置
 
 | 环境变量 | 位置 | 说明 |
@@ -128,6 +130,9 @@ waystone recall "登录模块有哪些已确认的决定？"
 | `MEM0_URL` | 服务端 | Mem0 服务地址 |
 | `MEM0_KEY_FILE` | 服务端 | Mem0 API Key 文件路径 |
 | `FORWARDED_ALLOW_IPS` | 服务端 | uvicorn 信任的转发来源，配合反向代理按真实 IP 限流 |
+| `PUBLIC_URL` | 服务端 | 对外地址（origin），设置后启用远程连接器与 OAuth 授权服务 |
+| `OAUTH_EXTRA_REDIRECT_URIS` | 服务端 | 额外允许的 OAuth 回调地址，逗号分隔、逐字匹配 |
+| `OAUTH_MAX_PENDING_CLIENTS` | 服务端 | 未产生令牌的已注册客户端上限，默认 500 |
 | `WAYSTONE_SERVER` | 客户端 | 服务地址；也可以在 `waystone login --server` 时指定并保存到本机会话 |
 | `WAYSTONE_PROFILE` | 客户端 | 本机会话文件路径，默认 `~/.config/waystone/session.json`（权限 600） |
 | `WAYSTONE_TRUST_ENV` | 客户端 | 设为 `1` 时读取 `HTTPS_PROXY`、`SSL_CERT_FILE` 等代理与证书环境变量 |
@@ -140,7 +145,9 @@ waystone recall "登录模块有哪些已确认的决定？"
 - **记忆不是指令**：召回结果明确标注为参考资料，不能覆盖用户要求、规则文件或工具权限。但共享记忆仍可能成为跨机器传播错误信息的通道，发布前请人工审阅。
 - **凭据检测是辅助**：只拦截明显的密钥写法，不能保证发现所有秘密。
 - **撤回的残留**：撤回会抹掉数据库正文并删除向量，但已生成的备份要到保留期后才轮换掉，Mem0 自身的历史库也可能留有原文，需要运维清理。
-- **目前不支持**：高可用多实例、项目所有者转让、会话列表与远程吊销、改密码、跨主题的语义矛盾识别。
+- **远程连接器**：授权页上的应用名称由客户端自报、无法验证；只批准自己刚发起的连接。远程授权可用 `waystone connections` / `disconnect` 查看和撤销。
+- **会话**：30 天内有使用自动续期，不设绝对上限；`logout` 只撤销当前会话。
+- **目前不支持**：高可用多实例、项目所有者转让、命令行会话列表与远程吊销、改密码、跨主题的语义矛盾识别。
 - **限流**：按单个来源 IP 计数；IPv6 客户端可以在同一网段内更换地址。
 
 与 Agent 原生记忆如何分工，见 [docs/memory-coexistence.md](docs/memory-coexistence.md)。安全问题请按 [SECURITY.md](SECURITY.md) 私下报告。

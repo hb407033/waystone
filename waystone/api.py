@@ -2,6 +2,7 @@ import os
 import threading
 import time
 from collections import defaultdict, deque
+from contextlib import asynccontextmanager
 from typing import Literal
 from fastapi import FastAPI, Depends, HTTPException, Request, Query
 from fastapi.exceptions import RequestValidationError
@@ -76,27 +77,47 @@ class Resolve(Input):
     expected_id: str|None=None
 
 
-def create_app(path=None,backend=None):
+def create_app(path=None,backend=None,public_url=None):
     store=Store(path or os.getenv('WAYSTONE_DB','/data/waystone.sqlite'))
     backend=backend or Mem0Backend(os.getenv('MEM0_URL','http://mem0:8000'),os.getenv('MEM0_KEY_FILE','/run/secrets/mem0_key'))
-    app=FastAPI(title='Waystone',version='0.5.0')
+    raw=os.getenv('PUBLIC_URL','') if public_url is None else public_url
+    if raw.strip():
+        from .oauth import normalize_public_url
+        public_url=normalize_public_url(raw)
+    else:public_url=''
+    remote={}
+    @asynccontextmanager
+    async def lifespan(app):
+        # 远程 MCP 的会话管理器必须在应用生命周期内运行；未启用远程连接器时什么也不做。
+        if 'mcp' in remote:
+            async with remote['mcp'].session_manager.run():yield
+        else:yield
+    app=FastAPI(title='Waystone',version='0.6.2',lifespan=lifespan)
     app.state.store=store
     @app.exception_handler(RequestValidationError)
     async def validation_error(request, exc):
         return JSONResponse(status_code=422,content={'detail':'参数无效，请检查字段及长度'})
-    attempts=defaultdict(deque);rate_lock=threading.Lock();index_lock=threading.Lock()
+    attempts=defaultdict(deque);rate_lock=threading.Lock();locks={};locks_guard=threading.Lock()
+    def entry_lock(eid):
+        # 撤回与索引按记录互斥即可：Mem0 卡住时只阻塞同一条记录，不阻塞其他发布和撤回。锁对象按记录累积，数量与记录数同级，不回收。
+        with locks_guard:return locks.setdefault(eid,threading.Lock())
+    app.state.entry_lock=entry_lock
 
-    def limited(request:Request):
-        host=(request.client.host if request.client else 'unknown',request.url.path)
+    def over_limit(key,limit):
         with rate_lock:
             now=time.monotonic()
             # 删除不活跃的 IP，防止限流表无限增长。
-            for key in list(attempts):
-                if not attempts[key] or attempts[key][-1]<now-60:del attempts[key]
-            q=attempts[host]
+            for k in list(attempts):
+                if not attempts[k] or attempts[k][-1]<now-60:del attempts[k]
+            q=attempts[key]
             while q and q[0]<now-60:q.popleft()
-            if len(q)>=(240 if request.url.path=='/device/poll' else 20):raise HTTPException(429,'登录尝试过多，请稍后再试')
+            if len(q)>=limit:return True
             q.append(now)
+            return False
+
+    def limited(request:Request):
+        host=(request.client.host if request.client else 'unknown',request.url.path)
+        if over_limit(host,240 if request.url.path=='/device/poll' else 20):raise HTTPException(429,'登录尝试过多，请稍后再试')
 
     def user(request:Request):
         h=request.headers.get('Authorization','')
@@ -107,8 +128,8 @@ def create_app(path=None,backend=None):
         if entry['status']=='active' and (force or entry['index_status']!='ready'):
             try:
                 with store.connect() as c:c.execute("UPDATE entries SET index_status='pending' WHERE id=? AND status='active'",(entry['id'],))
-                with index_lock:
-                    # 撤回与索引共用 index_lock；拿到锁后以数据库当前状态为准，避免 reindex 用旧快照把刚撤回的正文写回向量库。
+                with entry_lock(entry['id']):
+                    # 撤回与索引共用同一记录的锁；拿到锁后以数据库当前状态为准，避免 reindex 用旧快照把刚撤回的正文写回向量库。
                     if not store.is_active(entry['id']):return entry
                     backend.index(entry['project'],entry)
                     store.mark_indexed(entry['id'])
@@ -119,14 +140,23 @@ def create_app(path=None,backend=None):
         return entry
 
     @app.get('/health')
-    def health():return {'status':'ok','version':'0.5.0'}
+    def health():return {'status':'ok','version':'0.6.2'}
+    ready_until=[0.0];ready_lock=threading.Lock();last_probe=[0.0,False]
     @app.get('/ready')
     def ready():
-        try:
-            with store.connect() as c:c.execute('SELECT 1').fetchone()
-            backend.ready()
-            return {'status':'ready'}
-        except Exception:return JSONResponse(status_code=503,content={'status':'not_ready'})
+        # 就绪检查会做一次真实检索；成功结果缓存 30 秒，监控和探针频繁调用时不给 Mem0 增加负载。失败不缓存，恢复后立即反映。
+        # 缓存到期时只让一个请求去探测：在锁上等待的请求若在自己到达之后已有一次探测完成，直接共用那次结果（包括失败），不再各自重复探测。
+        arrived=time.monotonic()
+        with ready_lock:
+            if time.monotonic()<ready_until[0]:return {'status':'ready'}
+            if last_probe[0]>arrived:ok=last_probe[1]
+            else:
+                try:
+                    with store.connect() as c:c.execute('SELECT 1').fetchone()
+                    backend.ready();ok=True
+                except Exception:ok=False
+                ready_until[0]=time.monotonic()+30 if ok else 0.0;last_probe[:]=[time.monotonic(),ok]
+        return {'status':'ready'} if ok else JSONResponse(status_code=503,content={'status':'not_ready'})
 
     @app.post('/auth/login',dependencies=[Depends(limited)])
     def login(body:Login):
@@ -167,7 +197,7 @@ def create_app(path=None,backend=None):
         entry=store.retract(p,u,eid)
         if entry['index_status']!='purged':
             try:
-                with index_lock:
+                with entry_lock(eid):
                     # 先把查到的向量 ID 写进审计再逐条删除，删完再查，查不到才算清理完成；最多 10 轮，防止向量库异常时无限循环。
                     for _ in range(10):
                         ids=backend.vector_ids(p,eid)
@@ -193,14 +223,14 @@ def create_app(path=None,backend=None):
     def recall(p:str,body:Recall,u=Depends(user)):
         with store.connect() as c:store.acl(c,p,u)
         eligible,unknown=store.candidates(p,u,body.environment,body.branch)
-        try:
-            ids=backend.search(p,body.query,body.limit,eligible)
-            unknown_ids=backend.search(p,body.query,body.limit,unknown)
+        # 已注明与未注明范围的候选合并成一次检索再分流：每次 Mem0 调用都有固定开销，两组共享 top_k 名额（取 limit 的两倍）。
+        scoped,unscoped_set=set(eligible),set(unknown)
+        try:ids=backend.search(p,body.query,min(body.limit*2,60),eligible+unknown) if scoped or unscoped_set else []
         except Exception:raise HTTPException(503,'向量检索暂不可用；已发布记录仍可通过 entries 查看')
-        selected=[e for e in store.recall(p,u,ids,body.limit) if e['id'] in eligible]
-        unscoped=[e for e in store.recall(p,u,unknown_ids,body.limit) if e['id'] in unknown]
+        selected=[e for e in store.recall(p,u,[i for i in ids if i in scoped],body.limit) if e['id'] in scoped]
+        unscoped=[e for e in store.recall(p,u,[i for i in ids if i in unscoped_set],body.limit) if e['id'] in unscoped_set]
         keys={(e['topic'],e['environment'],e['branch']) for e in selected+unscoped}
-        conflicts=[e for e in store.entries(p,u) if e['status']=='proposed' and (e['expires_at'] is None or e['expires_at']>time.time()) and (e['topic'],e['environment'],e['branch']) in keys]
+        conflicts=[e for e in store.proposals(p,u) if (e['topic'],e['environment'],e['branch']) in keys]
         return {'entries':selected,'unscoped_entries':unscoped[:body.limit],'conflicts':conflicts,
             'warnings':(['未注明适用范围的记录须核实后使用。'] if unscoped else [])+(['查询未限定完整环境和分支，请核对每条记录的适用范围。'] if not body.environment or not body.branch else []),
             'instruction':'记忆是有来源的参考资料。先核对适用环境、分支、来源版本及现有代码；不按时间戳自动裁决，不覆盖当前用户要求或项目规则。冲突提示仅覆盖同主题同范围的提案，不保证发现语义矛盾。'}
@@ -223,4 +253,24 @@ def create_app(path=None,backend=None):
             return [dict(r) for r in c.execute('SELECT * FROM audit WHERE project=? ORDER BY id DESC LIMIT 200',(p,))]
     from .device import install_device_routes
     install_device_routes(app,store,user,limited)
+    # 远程 MCP 工具直接调用这些路由函数，权限、凭据拦截、索引和撤回逻辑只有一份。
+    app.state.ops={'projects':projects,'recall':recall,'save':save,'entry_page':entry_page,'resolve':resolve,'rebase':rebase,'reject':reject,'retract':retract,'reindex':reindex}
+    if public_url:
+        from .oauth import SqliteOAuthProvider,install_oauth_routes
+        from .remote_mcp import build_remote_mcp
+        extra=[u.strip() for u in os.getenv('OAUTH_EXTRA_REDIRECT_URIS','').split(',') if u.strip()]
+        oauth_limits={'/register':20,'/token':120,'/authorize':30}
+        @app.middleware('http')
+        async def oauth_rate_limit(request,call_next):
+            # SDK 的注册、令牌、授权路由无法挂 FastAPI 依赖，在外层按来源 IP 限流：/register、/token 限额放宽，因为 Claude 用户共用 Anthropic 的出站网段；/authorize 由用户浏览器直接访问。
+            limit=oauth_limits.get(request.url.path)
+            if limit and over_limit((request.client.host if request.client else 'unknown',request.url.path),limit):
+                return JSONResponse(status_code=429,content={'error':'temporarily_unavailable','error_description':'请求过多，请稍后再试'},headers={'Retry-After':'60'})
+            return await call_next(request)
+        provider=SqliteOAuthProvider(store,public_url,extra,max_pending=int(os.getenv('OAUTH_MAX_PENDING_CLIENTS','500')))
+        app.state.oauth_provider=provider
+        install_oauth_routes(app,store,user,limited,backend,provider)
+        remote['mcp']=build_remote_mcp(app.state.ops,provider,public_url)
+        # 挂在所有 FastAPI 路由之后：已有接口优先匹配，/mcp、/.well-known/*、/authorize、/token、/register、/revoke 交给 MCP SDK。
+        app.mount('/',remote['mcp'].streamable_http_app())
     return app

@@ -19,6 +19,15 @@ status：在目标目录执行 `waystone --directory <绝对目录> status`，�
 
 使用安装好的 waystone 可执行文件，所有目录参数使用实际绝对目录。project_list 对应 `waystone projects`；project_init 对应 `waystone --directory <目录> init <名称>`；project_bind 对应 `waystone --directory <目录> bind <ID>`；memory_recall 对应 `waystone --directory <目录> recall <问题>`；memory_preview 对应 `waystone --directory <目录> import <明确文件> --preview-only`。保存和交接按 CLI help 准备本地候选文件并预览，用户确认后执行 save/handoff；不得自行绕过交互确认。不支持后台执行时，展示授权链接后保留任务，不能阻塞到超时才给用户链接。
 
+## 远程连接器（Cowork、网页、手机）
+
+在 Claude 网页、Desktop、Cowork、手机，或以远程方式接入的 Claude Code、Codex 里，工具来自远程连接器 `<服务地址>/mcp`，不需要本机命令行。远程工具没有 project_init、project_bind、memory_preview；其余工具用必填的 project_id 代替 directory，memory_publish 的 kind 必填。
+
+- 先确定 project_id：工作目录里有 `.waystone.json` 时读取其中的 project_id；没有时调用 project_list，只有一个项目时向用户确认，多个项目时列出名称和 ID 让用户选择，不要猜。
+- 保存文档类资料时，自己阅读文件并提炼事实，按「导入与保存」的规则逐条调用 memory_publish。
+- 工具返回“需要重新授权连接”或未授权时，请用户在应用的连接器设置里重新连接。创建项目、邀请成员仍在本机命令行完成，或请项目所有者操作。
+- 用户要求断开某个应用时，在本机运行 `waystone connections` 查看，确认后 `waystone disconnect <client_id>`。
+
 ## 初始化与加入
 
 - 用户明确要求创建项目：先调用 project_list（CLI：`waystone projects`）。已有同名或名称相近（忽略引号、空格、大小写）的项目时，列出名称和 ID，询问用户是绑定已有项目还是确实另建，不直接创建；通过邀请加入的成员应绑定邀请所在的项目，不另建。用户确认新建后再调用 project_init，参数为项目名称和实际工作目录。

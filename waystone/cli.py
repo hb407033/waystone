@@ -4,15 +4,15 @@ import json
 import os
 import sys
 from pathlib import Path
-from .client import Client, preview
+from .client import Client, NetworkError, preview
 
 
 def scope_args(args):
     return {k:getattr(args,k,'') for k in ('environment','branch','source_version')}
 
 def emit(data):print(json.dumps(data,ensure_ascii=False,indent=2))
-def confirm():
-    if input('确认将上述内容发布到项目记忆服务？输入 yes：').strip()!='yes':raise ValueError('已取消，未上传')
+def confirm(message='确认将上述内容发布到项目记忆服务？输入 yes：'):
+    if input(message).strip()!='yes':raise ValueError('已取消，未上传')
 
 def main():
     parser=argparse.ArgumentParser(description='项目记忆：初始化、邀请加入、预览导入和交接')
@@ -22,7 +22,8 @@ def main():
     parser.add_argument('--source-version',default='')
     commands=parser.add_subparsers(dest='command',required=True)
     login=commands.add_parser('login');login.add_argument('--server',default=os.getenv('WAYSTONE_SERVER',''));login.add_argument('--password-login',action='store_true')
-    commands.add_parser('logout');commands.add_parser('projects');commands.add_parser('status')
+    commands.add_parser('logout');commands.add_parser('projects');commands.add_parser('status');commands.add_parser('connections')
+    disconnect=commands.add_parser('disconnect');disconnect.add_argument('client_id')
     init=commands.add_parser('init');init.add_argument('name')
     bind=commands.add_parser('bind');bind.add_argument('project_id')
     invite=commands.add_parser('invite');invite.add_argument('email');invite.add_argument('--role',choices=['reader','collaborator'],default='collaborator')
@@ -69,13 +70,20 @@ def run(args):
             print('请在浏览器核对设备并登录授权：'+url,flush=True)
             print('授权码：'+started['user_code'],flush=True)
             webbrowser.open(url)
-            deadline=time.monotonic()+started['expires_in']
+            deadline=time.monotonic()+started['expires_in'];lost=False
             while time.monotonic()<deadline:
                 time.sleep(started['interval'])
-                result=c.request('POST','/device/poll',{'device_code':started['device_code']},False)
+                try:result=c.request('POST','/device/poll',{'device_code':started['device_code']},False)
+                except NetworkError:
+                    # 网络抖动不应中断授权：用户可能正在浏览器里批准，继续等到授权码过期为止。
+                    print('网络暂时不可用，继续等待授权…',file=sys.stderr,flush=True);lost=True;continue
+                except ValueError as e:
+                    # 服务端领取会话后即删除设备码；若成功响应恰好在断网时丢失，之后只会收到“无效”，这时无法判断是否已授权。
+                    if lost:raise ValueError('网络中断期间授权结果不确定，请重新运行 waystone login') from e
+                    raise
                 if result.get('token'):break
             else:raise ValueError('授权超时，请重新登录')
-        c.session(result);print('登录成功；会话仅保存在本机私有配置中，有效期 7 天。');return
+        c.session(result);print('登录成功；会话仅保存在本机私有配置中，30 天内有使用会自动续期。');return
     if cmd=='logout':
         c.request('POST','/auth/logout');c.profile.unlink();print('已退出');return
     if cmd=='projects':emit(c.request('GET','/projects'));return
@@ -91,6 +99,14 @@ def run(args):
             result=c.request('POST','/auth/join',{'invite':token,'email':input('受邀邮箱：'),'name':input('姓名：'),'password':getpass.getpass('设置密码（至少 12 位）：')},False)
         c.session(result);emit(c.bind(directory,result['project_id']));return
     if cmd=='status':emit(c.binding(directory));return
+    if cmd=='connections':emit(c.request('GET','/auth/connections'));return
+    if cmd=='disconnect':
+        import uuid
+        # client_id 必须是 UUID：先校验再询问确认，避免把输入原样拼进请求路径。
+        try:client_id=str(uuid.UUID(args.client_id))
+        except ValueError:raise ValueError('client_id 格式不正确，请从 waystone connections 的输出复制')
+        print('将断开该应用的远程连接，并作废它持有的全部令牌：'+client_id)
+        confirm('输入 yes 断开该应用并作废它持有的全部令牌：');emit(c.request('DELETE','/auth/connections/'+client_id));return
     base=c.project_path(directory)
     if cmd=='invite':
         result=c.request('POST',base+'/invites',{'email':args.email,'role':args.role});result['invite_url']=c.url+'/invite#'+result['invite'];emit(result);return

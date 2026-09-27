@@ -87,6 +87,28 @@
 - **撤回当前版本之后**：如果被撤回的是某条提案所替代的当前版本，该主题暂时没有有效版本，所有者核对后用 `resolve` 且不传 `--expected`（MCP 中 `expected_id` 留空）让提案生效；撤回后再发布同主题内容，也会成为需要所有者确认的提案。
 - **撤回的残留**：已生成的备份要到 28 天保留期后才会轮换掉；Mem0 自身的历史库可能保留原文，需要按 `purge_vectors` 审计里的向量 ID 在服务器上核对清理。
 
+## 远程连接器（OAuth）
+
+让 Claude 网页、Desktop、Cowork、手机，以及 Claude Code、Codex 不装客户端、直接通过 `<服务地址>/mcp` 使用 Waystone。
+
+- **启用**：在 `deploy/compose.yaml` 设置 `PUBLIC_URL`（形如 `https://memory.example.com`，只能是 origin，不带路径和末尾斜杠）。它必须与用户填写的连接地址前缀完全一致，Claude 会校验受保护资源元数据里的 `resource`。留空则不挂载 `/mcp`、`/.well-known/*`、`/authorize`、`/token`、`/register`、`/revoke`、`/oauth/consent`。
+- **协议**：动态客户端注册（一律按公共客户端，不签发 client secret）+ PKCE S256；访问令牌 1 小时，刷新令牌 30 天、每次刷新轮换，已用过的刷新令牌被重放时作废整个令牌家族。授权请求 10 分钟、授权码 5 分钟，均一次性。所有令牌只存 sha256 哈希（表 `oauth_clients`、`oauth_requests`、`oauth_codes`、`oauth_tokens`）。
+- **回调白名单**：默认只允许 `https://claude.ai/api/mcp/auth_callback` 和本机回环地址（忽略端口，`127.0.0.1`、`localhost`、`::1` 视为同一主机，路径必须一致）；其他客户端通过 `OAUTH_EXTRA_REDIRECT_URIS`（逗号分隔、逐字匹配）加入。
+- **限流与上限**：`/register` 每 IP 每分钟 20 次、`/token` 120 次、`/authorize` 30 次；待确认授权请求每客户端 20 个、全局 1000 个；未产生令牌的客户端总数上限 `OAUTH_MAX_PENDING_CLIENTS`（默认 500）；客户端注册信息不超过 8 KB。
+- **网络**：Claude 从 Anthropic 的出站网段（`160.79.104.0/21`）访问 `/mcp`、`/.well-known/*`、`/register`、`/token`，WAF 或 CDN 不得对这些路径做人机质询。
+- **断开**：用户用 `waystone connections` / `waystone disconnect <client_id>` 自助撤销；紧急情况下在同一事务里执行 `DELETE FROM oauth_codes WHERE user_id=?; DELETE FROM oauth_tokens WHERE user_id=?;`。
+- **残余风险与审计**：授权页上的应用名称由客户端自报、无法验证；用户若被诱导批准他人发来的授权链接，授权可能落到对方账户。批准、拒绝、刷新令牌重放、撤销、断开都会写入 `audit` 表（`action` 以 `oauth_` 开头）；`oauth_refresh_reuse` 可能意味着令牌泄露。
+
+## 健康检查与性能
+
+- 容器健康检查只看进程是否存活（`/health`）；依赖是否可用看 `/ready`，成功结果缓存 30 秒，并发请求共用同一次探测。依赖故障靠监控脚本读 `/ready` 发现，请确保通知链可用。
+- **Mem0 的 API Key 校验很慢**：Mem0 用 bcrypt 校验普通 API Key，每次调用约 260 毫秒，远大于检索本身（约 25 毫秒）。建议在 Mem0 配置 `ADMIN_API_KEY`（常量时间比较），Waystone 的 Key 文件改用它。Key 在服务首次调用 Mem0 时读取，更换后需重启服务。
+- 服务端复用到 Mem0 的连接；一次召回只调用一次向量检索（已注明与未注明范围的候选共享 `2×limit` 个名额，任一组都可能被挤掉，需要只看某一范围时传完整的环境和分支）。
+- 客户端在进程内复用连接、空闲保留 120 秒，常驻的 MCP 服务连续调用可省掉每次的 TLS 握手；连接超时 5 秒，等待响应 30 秒（重建与撤回 120 秒）。
+- 会话 30 天内有使用自动续期（每天最多续一次），不设绝对上限。`logout` 只撤销当前会话；怀疑泄露时执行 `DELETE FROM sessions WHERE user_id=?`。
+- 撤回与索引按记录加锁，锁对象随记录数增长、不回收。
+- 容器日志按 10 MB × 3 个文件轮转；httpx 请求记录降到警告级别。
+
 ## 升级
 
 1. 用 SQLite backup API 保存一致快照，备份当前 compose 文件和反向代理配置。

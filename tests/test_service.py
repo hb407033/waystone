@@ -197,3 +197,79 @@ def test_publish_rejects_obvious_credentials(system,field,value):
     r=save(c,p,**{field:value})
     assert r.status_code==400 and '凭据' in r.json()['detail'] and value not in r.text
     assert c.get(f'/projects/{p}/entries').json()==[] and b.entries=={}
+
+
+def test_recall_uses_one_vector_search_and_splits_scopes(system):
+    c,b,_=system;p=project(c)
+    assert save(c,p,topic='db/engine',environment='prod',branch='main').status_code==200
+    assert save(c,p,topic='db/notes',content='未注明范围的数据库资料').status_code==200
+    calls=[];orig=b.search
+    def spy(*a,**k):calls.append(a);return orig(*a,**k)
+    b.search=spy
+    r=c.post(f'/projects/{p}/recall',json={'query':'数据库','environment':'prod','branch':'main'}).json()
+    assert len(calls)==1
+    assert [e['topic'] for e in r['entries']]==['db/engine'] and [e['topic'] for e in r['unscoped_entries']]==['db/notes']
+
+def test_recall_conflicts_do_not_load_all_entries(system):
+    c,b,app=system;p=project(c)
+    first=save(c,p).json();prop=save(c,p,content='改用 MySQL 数据库').json()
+    assert prop['status']=='proposed'
+    app.state.store.entries=lambda *a,**k:(_ for _ in ()).throw(AssertionError('recall 不应读取全部记忆'))
+    r=c.post(f'/projects/{p}/recall',json={'query':'数据库'}).json()
+    assert [e['id'] for e in r['conflicts']]==[prop['id']] and first['id'] in [e['id'] for e in r['entries']]
+
+
+def test_index_locks_are_per_entry(system):
+    import threading
+    c,b,app=system;p=project(c)
+    lk=app.state.entry_lock
+    assert lk('a') is lk('a') and lk('a') is not lk('b')
+    # 两条不同记录必须能同时进入索引：栅栏要等两方都到达才放行，若被同一把锁串行化会超时，索引失败留在 pending。
+    orig=b.index;gate=threading.Barrier(2,timeout=3)
+    def paired(project,entry):gate.wait();orig(project,entry)
+    b.index=paired
+    out=[None,None]
+    def run(i):out[i]=save(c,p,topic=f't/{i}',content=f'事实 {i}').json()
+    threads=[threading.Thread(target=run,args=(i,)) for i in range(2)]
+    [t.start() for t in threads];[t.join(10) for t in threads]
+    assert not any(t.is_alive() for t in threads)
+    assert [o['index_status'] for o in out]==['ready','ready']
+
+def test_retract_waits_for_inflight_index_of_same_entry(system):
+    import threading
+    c,b,app=system;p=project(c);e=save(c,p).json()
+    orig=b.index;entered=threading.Event();release=threading.Event();done=threading.Event();res={}
+    def blocked(project,entry):entered.set();release.wait(5);orig(project,entry)
+    b.index=blocked
+    reindex=threading.Thread(target=lambda:res.update(reindex=c.post(f'/projects/{p}/reindex',json={'full':True}).status_code));reindex.start()
+    assert entered.wait(5)
+    def do_retract():res['retract']=c.post(f'/projects/{p}/entries/{e["id"]}/retract').json();done.set()
+    retract=threading.Thread(target=do_retract);retract.start()
+    # 撤回的数据库部分会先提交，但清理向量必须等同一记录上正在进行的索引结束，否则刚删掉的向量会被写回。
+    assert not done.wait(0.5)
+    release.set();reindex.join(10);retract.join(10)
+    assert res['reindex']==200 and res['retract']['index_status']=='purged'
+    assert e['id'] not in b.entries
+
+def test_session_slides_and_expired_rows_are_purged(system):
+    c,_,app=system;s=app.state.store
+    with s.connect() as db:db.execute('UPDATE sessions SET expires=?',(time.time()+86400,))
+    assert c.get('/projects').status_code==200
+    with s.connect() as db:assert db.execute('SELECT max(expires) FROM sessions').fetchone()[0]>time.time()+29*86400
+    uid=c.post('/auth/login',json={'email':'owner@example.com','password':'test-password-123'}).json()['user_id']
+    with s.connect() as db:
+        db.execute("INSERT INTO sessions VALUES('stale',?,0)",(uid,))
+        db.execute("INSERT INTO devices VALUES('olddev','oldcode','x',0,NULL)")
+    r=c.post('/auth/login',json={'email':'owner@example.com','password':'test-password-123'}).json()
+    assert r['expires_in']==30*86400
+    with s.connect() as db:
+        assert not db.execute("SELECT 1 FROM sessions WHERE hash='stale'").fetchone()
+        assert not db.execute("SELECT 1 FROM devices WHERE hash='olddev'").fetchone()
+    bad=c.get('/projects',headers={'Authorization':'Bearer nope'})
+    assert bad.status_code==401 and 'waystone login' in bad.json()['detail']
+
+def test_expired_session_is_not_revived(system):
+    c,_,app=system
+    with app.state.store.connect() as db:db.execute('UPDATE sessions SET expires=?',(time.time()-1,))
+    assert c.get('/projects').status_code==401
+    with app.state.store.connect() as db:assert db.execute('SELECT max(expires) FROM sessions').fetchone()[0]<time.time()
