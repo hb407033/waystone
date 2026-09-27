@@ -1,29 +1,29 @@
-# 服务端部署与运维
+# Server deployment and operations
 
-适用于小团队单实例自托管：一台服务器、允许维护窗口，不承诺高可用。客户端安装见 [install.md](install.md)。
+For small-team, single-instance self-hosting: one server, maintenance windows allowed, no high availability promised. For client setup, see [install.md](install.md).
 
-## 部署拓扑
+## Deployment topology
 
-- **Waystone 服务**：Docker 容器，端口 8900 只映射到宿主机 `127.0.0.1`，加入 Mem0 所在的 Docker 网络，通过 `MEM0_URL` 访问 Mem0。
-- **反向代理**：负责 HTTPS 证书，并把真实来源 IP 写入 `X-Forwarded-For`，示例配置为 [`deploy/Caddyfile.example`](../deploy/Caddyfile.example)。
-- **数据**：SQLite 数据库位于挂载卷 `data/`，是记录的唯一权威来源；Mem0 只做可重建的向量索引。
-- **凭据**：Mem0 服务 API Key 以只读文件挂载进容器，成员和 Agent 永远拿不到。
+- **Waystone service**: Docker container, port 8900 mapped only to the host's `127.0.0.1`, joined to the Docker network Mem0 is on, reaching Mem0 via `MEM0_URL`.
+- **Reverse proxy**: handles HTTPS certificates and writes the real source IP into `X-Forwarded-For`; example config at [`deploy/Caddyfile.example`](../deploy/Caddyfile.example).
+- **Data**: the SQLite database lives on the mounted `data/` volume and is the source of truth for all records; Mem0 is only a rebuildable vector index.
+- **Credentials**: the Mem0 service API key is mounted into the container as a read-only file; members and agents never see it.
 
-## 首次部署
+## First-time deployment
 
-1. 部署 [Mem0 官方自托管服务](https://docs.mem0.ai/open-source/setup)，创建管理员账号，并为 Waystone 生成一个服务用 API Key。
-2. 在服务器上准备 `/opt/waystone`（备份与监测脚本默认使用这个路径），放入 `deploy/compose.yaml`，创建 `data/` 目录和权限为 600 的 `secrets/mem0_key`。
-3. 按实际情况修改 `compose.yaml`：镜像标签、`MEM0_URL`、外部网络名（示例是 `mem0_default`）。
-4. 构建并启动：
+1. Deploy the [Mem0 official self-hosted service](https://docs.mem0.ai/open-source/setup), create an admin account, and generate a service API key for Waystone.
+2. On the server, prepare `/opt/waystone` (the backup and monitoring scripts use this path by default), place `deploy/compose.yaml` there, and create the `data/` directory plus a `secrets/mem0_key` file with 600 permissions.
+3. Edit `compose.yaml` for your environment: the image tag, `MEM0_URL`, and the external network name (the example uses `mem0_default`).
+4. Build and start:
 
    ```bash
    docker build -t waystone:0.5.0 .
    docker compose -f /opt/waystone/compose.yaml up -d
    ```
 
-5. 参考 `deploy/Caddyfile.example` 配置域名。不经过 Cloudflare 时，可以删掉 `@cloudflare` 分支，只保留 `header_up X-Forwarded-For {remote_host}` 那一段。
-6. 确认 `curl https://memory.example.com/ready` 返回 `{"status":"ready"}`，再用 Mem0 管理员账号执行 `waystone login --server https://memory.example.com` 创建第一个项目。
-7. （推荐）用新镜像连真实 Mem0 做一次隔离冒烟，它使用临时数据库，结束后只清理本次测试产生的向量：
+5. Configure your domain following `deploy/Caddyfile.example`. If you're not behind Cloudflare, you can drop the `@cloudflare` branch and keep only the `header_up X-Forwarded-For {remote_host}` section.
+6. Confirm `curl https://memory.example.com/ready` returns `{"status":"ready"}`, then create the first project with `waystone login --server https://memory.example.com` using the Mem0 admin account.
+7. (Recommended) Run an isolated smoke test against the real Mem0 with the new image; it uses a temporary database and afterwards only cleans up the vectors created during this test:
 
    ```bash
    docker run --rm --network mem0_default -e MEM0_URL=http://mem0:8000 -e MEM0_KEY_FILE=/run/secrets/mem0_key \
@@ -31,94 +31,94 @@
      waystone:0.5.0 python /app/smoke.py
    ```
 
-## 服务端配置
+## Server configuration
 
-| 环境变量 | 默认值 | 说明 |
+| Variable | Default | Description |
 |---|---|---|
-| `WAYSTONE_DB` | `/data/waystone.sqlite` | SQLite 数据库路径 |
-| `MEM0_URL` | `http://mem0:8000` | Mem0 服务地址 |
-| `MEM0_KEY_FILE` | `/run/secrets/mem0_key` | Mem0 服务 API Key 文件 |
-| `FORWARDED_ALLOW_IPS` | uvicorn 默认只信任 `127.0.0.1` | compose 中设为 `*`，让限流采信反向代理写入的来源 IP |
+| `WAYSTONE_DB` | `/data/waystone.sqlite` | SQLite database path |
+| `MEM0_URL` | `http://mem0:8000` | Mem0 server address |
+| `MEM0_KEY_FILE` | `/run/secrets/mem0_key` | Mem0 service API key file |
+| `FORWARDED_ALLOW_IPS` | uvicorn's default trusts only `127.0.0.1` | set to `*` in compose so rate limiting honors the source IP written by the reverse proxy |
 
-## 登录限流与来源 IP
+## Login rate limiting and source IP
 
-登录、加入和设备授权接口按来源 IP 每分钟 20 次限流，设备轮询每分钟 240 次。
+Login, join, and device authorization endpoints are rate limited to 20 requests per source IP per minute; device polling is limited to 240 per minute.
 
-- 容器内看到的连接对端是 Docker 网关，不是真实用户，所以必须由反向代理写入来源 IP，并让 uvicorn 采信（`FORWARDED_ALLOW_IPS='*'`）。端口只映射到 `127.0.0.1`，外部请求一定经过反向代理。
-- 示例 Caddy 配置：对端属于 Cloudflare 网段且带 `CF-Connecting-IP` 时取该头，其余情况取 TCP 对端地址，并覆盖客户端自带的 `X-Forwarded-For`，所以伪造转发头绕不过限流。
-- Cloudflare 调整网段时，同步更新 Caddyfile 和 `tests/test_proxy.py`。Cloudflare 侧不要开启「Remove visitor IP headers」托管转换，否则所有请求会按边缘节点 IP 计数。
-- 已知边界：同一 Docker 网络里的其他容器可以直连服务并自带转发头；IPv6 客户端可以在同一网段内更换地址。
+- The peer address seen inside the container is the Docker gateway, not the real user, so the reverse proxy must write the source IP and uvicorn must honor it (`FORWARDED_ALLOW_IPS='*'`). The port is mapped only to `127.0.0.1`, so external requests always pass through the reverse proxy.
+- Example Caddy config: when the peer is in a Cloudflare range and carries `CF-Connecting-IP`, take that header; otherwise take the TCP peer address, and overwrite any client-supplied `X-Forwarded-For` — so forged forwarding headers can't bypass rate limiting.
+- When Cloudflare changes its ranges, update the Caddyfile and `tests/test_proxy.py` in sync. Don't enable the "Remove visitor IP headers" managed transform on the Cloudflare side, or all requests will be counted against edge node IPs.
+- Known limitations: other containers on the same Docker network can reach the service directly with their own forwarding headers; IPv6 clients can rotate addresses within the same subnet.
 
-## 备份、监测与恢复演练
+## Backups, monitoring, and recovery drills
 
-`deploy/` 下的 systemd 单元（`waystone-*.service` / `.timer`）复制到 `/etc/systemd/system/` 后，用 `systemctl enable --now <名称>.timer` 启用。
+Copy the systemd units under `deploy/` (`waystone-*.service` / `.timer`) to `/etc/systemd/system/`, then enable them with `systemctl enable --now <name>.timer`.
 
-| 脚本 | 定时 | 做什么 |
+| Script | Schedule | What it does |
 |---|---|---|
-| `backup.py` | 每天 00/06/12/18:15 | 生成一致的 SQLite 快照并做完整性检查；导出 Mem0 的 `postgres` 与 `mem0_app` 两个库并校验；复制 Mem0 历史库和两份 compose 文件；打包为 `backups/snapshot-*.tar.gz`，写 SHA-256 与 `latest.json`；保留 28 天。不包含 `.env` 和明文服务密钥；剩余空间不足 2 GB 时拒绝执行 |
-| `monitor.py` | 每 5 分钟 | 检查检索就绪、8 小时内有备份、35 天内做过恢复验证、磁盘余量，结果写 `/opt/waystone/ops/status.json` |
-| `restore-check.py` | 每月 1 日 03:30 | 把最新快照恢复到临时 SQLite 和无网络的临时 PostgreSQL 容器中校验，不碰线上数据 |
+| `backup.py` | daily at 00:15/06:15/12:15/18:15 | takes a consistent SQLite snapshot with integrity checks; exports Mem0's `postgres` and `mem0_app` databases with verification; copies the Mem0 history database and both compose files; packages them as `backups/snapshot-*.tar.gz`, writing SHA-256 checksums and `latest.json`; 28-day retention. Excludes `.env` and plaintext service keys; refuses to run when free disk space is under 2 GB |
+| `monitor.py` | every 5 minutes | checks search readiness, a backup within the last 8 hours, a recovery verification within the last 35 days, and free disk space; writes results to `/opt/waystone/ops/status.json` |
+| `restore-check.py` | monthly on the 1st at 03:30 | restores the latest snapshot into a temporary SQLite database and a network-isolated temporary PostgreSQL container for verification; never touches production data |
 
-`backup.py` 里写死了 Mem0 容器名 `mem0-postgres-1`、`mem0-mem0-1` 和 Mem0 compose 路径 `/opt/mem0/server/compose.deploy.yaml`，请按你的 Mem0 部署修改。
+`backup.py` hardcodes the Mem0 container names `mem0-postgres-1`, `mem0-mem0-1` and the Mem0 compose path `/opt/mem0/server/compose.deploy.yaml`; adjust them to match your Mem0 deployment.
 
-## 异地备份与独立监测（可选）
+## Offsite backups and independent monitoring (optional)
 
-主机内的监测无法报告自己宕机或断网，建议在另一台服务器上运行独立节点：
+Monitoring running on the host can't report its own outage or network failure, so run an independent node on a separate server:
 
-- `offsite-monitor.py`（`waystone-offsite.timer`，每 5 分钟）：检查公网 `/ready`，经 SSH 拉取最新快照，校验大小和 SHA-256 后原子更新，保留 28 天；失败时保留已有副本。
-- 主服务器给这台机器的专用公钥加上 `restrict,command="/usr/bin/python3 /opt/waystone/backup-export.py"` 和 `from=` 来源限制。`backup-export.py` 只允许读取状态、最新备份元数据和指定快照，拒绝其他命令和符号链接。
-- 使用专用系统用户 `waystone-offsite`；配置参考 `deploy/offsite-config.example.json`，放到 `/etc/waystone-offsite/config.json`；运行时固定主服务器主机公钥。
-- 邮件告警：以管理员身份运行 `setup-offsite-email.py --host <SMTP 服务器> --sender <发件邮箱> --recipient <收件邮箱>`，验证授权码并发送测试邮件后启用 `waystone-notify.timer`。只在状态变化时通知；发送失败保留队列重试；邮件不包含记忆内容或备份附件。SMTP 接受邮件不代表已送达收件箱，请实际确认。
+- `offsite-monitor.py` (`waystone-offsite.timer`, every 5 minutes): checks the public `/ready`, pulls the latest snapshot over SSH, atomically updates after verifying size and SHA-256, with 28-day retention; keeps the existing copy on failure.
+- On the primary server, add `restrict,command="/usr/bin/python3 /opt/waystone/backup-export.py"` and a `from=` source restriction to this machine's dedicated public key. `backup-export.py` only permits reading status, latest backup metadata, and a specified snapshot, and refuses all other commands and symlinks.
+- Use a dedicated system user `waystone-offsite`; for configuration see `deploy/offsite-config.example.json`, placed at `/etc/waystone-offsite/config.json`; pin the primary server's host public key at runtime.
+- Email alerts: as administrator, run `setup-offsite-email.py --host <SMTP server> --sender <sender email> --recipient <recipient email>`, verify the authorization code and send a test email, then enable `waystone-notify.timer`. Notify only on state changes; queue and retry on send failure; emails contain no memory content or backup attachments. SMTP acceptance does not mean the message reached the inbox — confirm delivery in practice.
 
-独立节点本身故障时仍会中断异地同步与告警，建议再用云平台自带的主机监控覆盖它。
+If the independent node itself fails, offsite sync and alerts still stop; consider covering it with your cloud provider's built-in host monitoring as well.
 
-## 索引修复
+## Index repair
 
-- `waystone reindex` 重试索引失败的记录；所有者用 `waystone reindex --full` 核对并补齐全部有效记录。每批返回 `next_cursor`，继续传 `--cursor` 直到为空；`pending` 不为 0 说明仍有失败。
-- 归档项目同样可以 reindex：归档只冻结新增和改写，不阻止修复索引。
-- 召回先用 SQL 按项目权限和有效范围筛出候选记录，再按候选 ID 分批向量检索，不会被其他环境或已失效的向量挤占。
+- `waystone reindex` retries records whose indexing failed; owners use `waystone reindex --full` to check and backfill all active records. Each batch returns `next_cursor`; keep passing `--cursor` until it's empty; a non-zero `pending` means failures remain.
+- Archived projects can be reindexed too: archiving only freezes additions and rewrites; it doesn't block index repair.
+- Recall first filters candidate records by project permissions and validity scope with SQL, then runs vector search in batches by candidate ID, so it can't be crowded out by vectors from other environments or expired vectors.
 
-## 冲突、交接与撤回
+## Conflicts, handoffs, and retraction
 
-- **冲突**：B、C 同时针对 A 提案，B 生效后，所有者核对 C 与 B，用 `rebase --expected <B>` 重新提交 C，再 `resolve --expected <B>` 选择是否生效。rebase 本身不让内容生效；版本再次变化返回 409，需要重新核对。
-- **拒绝**：`reject` 是终态，保留提案与审计，不能再 rebase；需要重新考虑时重新保存内容，会生成新提案。
-- **过期**：到期的有效记录和提案自动变为 expired，审计记为 `system`。交接到期后再次保存相同内容，会生成新的记录和有效期。
-- **撤回**：`retract` 把记录改为 retracted，正文替换为「[已撤回]」并重算内容哈希，删除 Mem0 中该记录的向量。删除前先把查到的向量 ID 写入审计 `purge_vectors`，删完再查一次，查不到才标记 purged；向量归属（命名空间、项目 ID）核对不一致时不删除，保持 `purge_pending`，再次执行 retract 会重试。
-- **撤回当前版本之后**：如果被撤回的是某条提案所替代的当前版本，该主题暂时没有有效版本，所有者核对后用 `resolve` 且不传 `--expected`（MCP 中 `expected_id` 留空）让提案生效；撤回后再发布同主题内容，也会成为需要所有者确认的提案。
-- **撤回的残留**：已生成的备份要到 28 天保留期后才会轮换掉；Mem0 自身的历史库可能保留原文，需要按 `purge_vectors` 审计里的向量 ID 在服务器上核对清理。
+- **Conflicts**: B and C both propose against A; after B takes effect, the owner reviews C against B, resubmits C with `rebase --expected <B>`, then decides whether it takes effect with `resolve --expected <B>`. Rebase alone doesn't make content take effect; if the version changes again, a 409 is returned and the review must be redone.
+- **Rejection**: `reject` is a terminal state that keeps the proposal and its audit trail; it can't be rebased afterwards. To reconsider, save the content again, which creates a new proposal.
+- **Expiry**: expired active records and proposals automatically become `expired`, with `system` recorded in the audit log. Saving identical content again after a handoff expires creates a new record and a new validity period.
+- **Retraction**: `retract` changes the record to `retracted`, replaces the body with "[retracted]" and recomputes the content hash, then deletes the record's vectors from Mem0. Before deleting, write the found vector IDs into the `purge_vectors` audit entry; after deleting, look them up once more, and only mark `purged` if they're gone. If vector ownership (namespace, project ID) doesn't match the check, don't delete — keep `purge_pending`, and running `retract` again retries.
+- **After retracting the current version**: if what was retracted was the current version that a proposal supersedes, that topic temporarily has no active version; the owner reviews it and runs `resolve` without `--expected` (leaving `expected_id` empty in MCP) to let the proposal take effect. Publishing content on the same topic after a retraction also becomes a proposal requiring owner confirmation.
+- **Retraction residue**: existing backups only rotate out after the 28-day retention period; Mem0's own history database may retain the original text, which must be verified and cleaned up on the server using the vector IDs in the `purge_vectors` audit entry.
 
-## 远程连接器（OAuth）
+## Remote connector (OAuth)
 
-让 Claude 网页、Desktop、Cowork、手机，以及 Claude Code、Codex 不装客户端、直接通过 `<服务地址>/mcp` 使用 Waystone。
+Lets Claude web, Desktop, Cowork, and mobile, as well as Claude Code and Codex, use Waystone directly through `<server-address>/mcp` with no client install.
 
-- **启用**：在 `deploy/compose.yaml` 设置 `PUBLIC_URL`（形如 `https://memory.example.com`，只能是 origin，不带路径和末尾斜杠）。它必须与用户填写的连接地址前缀完全一致，Claude 会校验受保护资源元数据里的 `resource`。留空则不挂载 `/mcp`、`/.well-known/*`、`/authorize`、`/token`、`/register`、`/revoke`、`/oauth/consent`。
-- **协议**：动态客户端注册（一律按公共客户端，不签发 client secret）+ PKCE S256；访问令牌 1 小时，刷新令牌 30 天、每次刷新轮换，已用过的刷新令牌被重放时作废整个令牌家族。授权请求 10 分钟、授权码 5 分钟，均一次性。所有令牌只存 sha256 哈希（表 `oauth_clients`、`oauth_requests`、`oauth_codes`、`oauth_tokens`）。
-- **回调白名单**：默认只允许 `https://claude.ai/api/mcp/auth_callback` 和本机回环地址（忽略端口，`127.0.0.1`、`localhost`、`::1` 视为同一主机，路径必须一致）；其他客户端通过 `OAUTH_EXTRA_REDIRECT_URIS`（逗号分隔、逐字匹配）加入。
-- **限流与上限**：`/register` 每 IP 每分钟 20 次、`/token` 120 次、`/authorize` 30 次；待确认授权请求每客户端 20 个、全局 1000 个；未产生令牌的客户端总数上限 `OAUTH_MAX_PENDING_CLIENTS`（默认 500）；客户端注册信息不超过 8 KB。
-- **网络**：Claude 从 Anthropic 的出站网段（`160.79.104.0/21`）访问 `/mcp`、`/.well-known/*`、`/register`、`/token`，WAF 或 CDN 不得对这些路径做人机质询。
-- **断开**：用户用 `waystone connections` / `waystone disconnect <client_id>` 自助撤销；紧急情况下在同一事务里执行 `DELETE FROM oauth_codes WHERE user_id=?; DELETE FROM oauth_tokens WHERE user_id=?;`。
-- **残余风险与审计**：授权页上的应用名称由客户端自报、无法验证；用户若被诱导批准他人发来的授权链接，授权可能落到对方账户。批准、拒绝、刷新令牌重放、撤销、断开都会写入 `audit` 表（`action` 以 `oauth_` 开头）；`oauth_refresh_reuse` 可能意味着令牌泄露。
+- **Enable**: set `PUBLIC_URL` in `deploy/compose.yaml` (e.g. `https://memory.example.com`; origin only, no path or trailing slash). It must be a verbatim prefix of the connection address the user enters — Claude validates the `resource` in the protected resource metadata. If left empty, `/mcp`, `/.well-known/*`, `/authorize`, `/token`, `/register`, `/revoke`, and `/oauth/consent` are not mounted.
+- **Protocol**: dynamic client registration (always as public clients; no client secret is issued) + PKCE S256; access tokens last 1 hour; refresh tokens last 30 days and rotate on each refresh; replaying a used refresh token invalidates the entire token family. Authorization requests last 10 minutes, authorization codes 5 minutes, both single-use. All tokens are stored as SHA-256 hashes only (tables `oauth_clients`, `oauth_requests`, `oauth_codes`, `oauth_tokens`).
+- **Callback allowlist**: by default only `https://claude.ai/api/mcp/auth_callback` and the machine's loopback addresses are allowed (ports ignored; `127.0.0.1`, `localhost`, and `::1` count as the same host; paths must match); other clients are added via `OAUTH_EXTRA_REDIRECT_URIS` (comma-separated, exact match).
+- **Rate limiting and caps**: `/register` 20/min per IP, `/token` 120/min, `/authorize` 30/min; pending authorization requests: 20 per client, 1000 globally; cap on registered clients that have not yet issued tokens `OAUTH_MAX_PENDING_CLIENTS` (default 500); client registration metadata max 8 KB.
+- **Network**: Claude reaches `/mcp`, `/.well-known/*`, `/register`, and `/token` from Anthropic's egress range (`160.79.104.0/21`); the WAF or CDN must not put a bot challenge on these paths.
+- **Disconnect**: users revoke access themselves with `waystone connections` / `waystone disconnect <client_id>`; in an emergency, run `DELETE FROM oauth_codes WHERE user_id=?; DELETE FROM oauth_tokens WHERE user_id=?;` in a single transaction.
+- **Residual risk and audit**: the app name shown on the consent page is self-reported by the client and can't be verified; if a user is tricked into approving an authorization link sent by someone else, the grant may land in the other person's account. Approvals, denials, refresh token replays, revocations, and disconnects are all written to the `audit` table (`action` starting with `oauth_`); `oauth_refresh_reuse` may indicate a leaked token.
 
-## 健康检查与性能
+## Health checks and performance
 
-- 容器健康检查只看进程是否存活（`/health`）；依赖是否可用看 `/ready`，成功结果缓存 30 秒，并发请求共用同一次探测。依赖故障靠监控脚本读 `/ready` 发现，请确保通知链可用。
-- **Mem0 的 API Key 校验很慢**：Mem0 用 bcrypt 校验普通 API Key，每次调用约 260 毫秒，远大于检索本身（约 25 毫秒）。建议在 Mem0 配置 `ADMIN_API_KEY`（常量时间比较），Waystone 的 Key 文件改用它。Key 在服务首次调用 Mem0 时读取，更换后需重启服务。
-- 服务端复用到 Mem0 的连接；一次召回只调用一次向量检索（已注明与未注明范围的候选共享 `2×limit` 个名额，任一组都可能被挤掉，需要只看某一范围时传完整的环境和分支）。
-- 客户端在进程内复用连接、空闲保留 120 秒，常驻的 MCP 服务连续调用可省掉每次的 TLS 握手；连接超时 5 秒，等待响应 30 秒（重建与撤回 120 秒）。
-- 会话 30 天内有使用自动续期（每天最多续一次），不设绝对上限。`logout` 只撤销当前会话；怀疑泄露时执行 `DELETE FROM sessions WHERE user_id=?`。
-- 撤回与索引按记录加锁，锁对象随记录数增长、不回收。
-- 容器日志按 10 MB × 3 个文件轮转；httpx 请求记录降到警告级别。
+- The container health check only looks at process liveness (`/health`); dependency availability is reported by `/ready`, whose successful result is cached for 30 seconds, and concurrent requests share a single probe. Dependency failures are discovered by the monitoring scripts reading `/ready`, so make sure the notification chain works.
+- **Mem0's API key check is slow**: Mem0 verifies ordinary API keys with bcrypt, costing about 260 ms per call — far more than the search itself (~25 ms). Configure `ADMIN_API_KEY` on Mem0 (constant-time comparison) and point Waystone's key file at it. The key is read the first time the service calls Mem0, so restart the service after rotating it.
+- The server reuses its connection to Mem0; one recall issues a single vector search (candidates with and without a declared scope share a 2×limit slot quota; either group can be crowded out — pass the full environment and branch when you need to look at just one scope).
+- The client reuses connections in-process, kept idle for 120 seconds, so a long-running MCP service skips the TLS handshake on each consecutive call; connection timeout is 5 seconds, response wait is 30 seconds (120 seconds for rebuild and retract).
+- Sessions auto-renew with use within 30 days (at most once per day), with no absolute cap. `logout` only revokes the current session; if you suspect a leak, run `DELETE FROM sessions WHERE user_id=?`.
+- Retraction and indexing lock per record; lock objects grow with the record count and are never reclaimed.
+- Container logs rotate at 10 MB × 3 files; httpx request logging dropped to warning level.
 
-## 升级
+## Upgrades
 
-1. 用 SQLite backup API 保存一致快照，备份当前 compose 文件和反向代理配置。
-2. 构建新镜像，先用上面的冒烟命令验证，再切换服务并确认 `/health` 版本和 `/ready`。
-3. 表结构变化会在服务启动时以追加字段的方式自动完成，不改写已有内容。回退时恢复旧镜像；如果新版本改过表结构，还要恢复升级前的数据库，并先导出升级后产生的写入。
+1. Take a consistent snapshot with the SQLite backup API, and back up the current compose file and reverse proxy configuration.
+2. Build the new image, validate it with the smoke command above first, then switch the service and confirm the `/health` version and `/ready`.
+3. Schema changes are applied automatically at startup by adding columns, without rewriting existing content. To roll back, restore the old image; if the new version changed the schema, also restore the pre-upgrade database, and export any writes made after the upgrade first.
 
-## 灾难恢复
+## Disaster recovery
 
-1. 在目标系统核对快照的 SHA-256 和内部 manifest，先用 `restore-check.py` 做隔离恢复验证；不要把历史快照直接覆盖到仍有新写入的线上库。
-2. 停止 Waystone 写入并保留故障现场；恢复 `waystone.sqlite`（必要时连同 `history.sqlite`），从 dump 恢复 `postgres` 与 `mem0_app` 数据库。
-3. 按保存的 compose 和对应镜像重建服务。数据库口令、JWT 密钥、模型 API Key、Mem0 服务 Key 等凭据不从聊天或日志恢复，由管理员在目标系统重新配置或生成，并撤销不再使用的旧凭据。
-4. 服务启动后检查 `/ready`，所有者对每个项目执行 `waystone reindex --full`，直到 `pending` 为 0。
-5. 用两个成员验证查询、冲突确认和撤权，再恢复写入；记录实际恢复耗时和采用的快照时间。
+1. On the target system, verify the snapshot's SHA-256 and internal manifest, and run an isolated restore verification with `restore-check.py` first; don't overwrite a production database that still has new writes with an older snapshot.
+2. Stop Waystone writes and preserve the failure scene; restore `waystone.sqlite` (plus `history.sqlite` if needed), and restore the `postgres` and `mem0_app` databases from the dump.
+3. Rebuild the service from the saved compose file and matching image. Credentials such as database passwords, JWT keys, model API keys, and the Mem0 service key are not recovered from chat or logs — the administrator re-configures or regenerates them on the target system and revokes the old credentials that are no longer used.
+4. After the service starts, check `/ready`, and have the owner run `waystone reindex --full` for each project until `pending` is 0.
+5. Verify queries, conflict resolution, and permission revocation with two members, then restore writes; record the actual recovery time and the snapshot timestamp used.
