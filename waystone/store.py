@@ -20,6 +20,8 @@ def normalized(text): return ' '.join(unicodedata.normalize('NFKC',text).split()
 def topic_key(text):
     return '/'.join(re.sub(r'\s+', '-', part.strip().casefold()) for part in unicodedata.normalize('NFKC',text).split('/'))
 RETRACTED='[已撤回]'
+# 会话 30 天内有使用就自动续期，常用成员不必每周重新登录。
+SESSION_TTL=30*86400
 
 def password_hash(password, salt=None):
     salt = salt or secrets.token_hex(16)
@@ -45,6 +47,12 @@ class Store:
             CREATE TABLE IF NOT EXISTS entries(id TEXT PRIMARY KEY,project TEXT REFERENCES projects(id),topic TEXT,content TEXT,hash TEXT,kind TEXT,source TEXT,agent TEXT,author TEXT REFERENCES users(id),status TEXT,index_status TEXT,supersedes TEXT,created REAL,expires_at REAL,UNIQUE(project,hash));
             CREATE TABLE IF NOT EXISTS devices(hash TEXT PRIMARY KEY,code_hash TEXT UNIQUE,label TEXT,expires REAL,user_id TEXT REFERENCES users(id));
             CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY,project TEXT,actor TEXT,action TEXT,target TEXT,created REAL);
+            CREATE TABLE IF NOT EXISTS oauth_clients(client_id TEXT PRIMARY KEY,info TEXT NOT NULL,created REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS oauth_requests(hash TEXT PRIMARY KEY,client_id TEXT NOT NULL REFERENCES oauth_clients(client_id) ON DELETE CASCADE,params TEXT NOT NULL,expires REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS oauth_codes(hash TEXT PRIMARY KEY,client_id TEXT NOT NULL REFERENCES oauth_clients(client_id) ON DELETE CASCADE,user_id TEXT NOT NULL REFERENCES users(id),params TEXT NOT NULL,expires REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS oauth_tokens(hash TEXT PRIMARY KEY,kind TEXT NOT NULL,client_id TEXT NOT NULL REFERENCES oauth_clients(client_id) ON DELETE CASCADE,user_id TEXT NOT NULL REFERENCES users(id),family TEXT NOT NULL,scopes TEXT NOT NULL,resource TEXT NOT NULL,expires REAL NOT NULL,used INTEGER NOT NULL DEFAULT 0);
+            CREATE INDEX IF NOT EXISTS oauth_tokens_family ON oauth_tokens(family);
+            CREATE INDEX IF NOT EXISTS oauth_tokens_user ON oauth_tokens(user_id,client_id);
             ''')
         # Additive fields preserve legacy content; never guess old scope or rewrite its topics.
         with self.connect() as c:
@@ -73,32 +81,41 @@ class Store:
 
     def session(self,c,uid):
         token=secrets.token_urlsafe(40)
-        c.execute('INSERT INTO sessions VALUES(?,?,?)',(digest(token),uid,time.time()+86400*7))
-        return {'token':token,'user_id':uid,'expires_in':86400*7}
+        # 登录时顺手清掉过期会话和设备码，两张表都不设独立清扫任务。
+        c.execute('DELETE FROM sessions WHERE expires<?',(time.time(),));c.execute('DELETE FROM devices WHERE expires<?',(time.time(),))
+        c.execute('INSERT INTO sessions VALUES(?,?,?)',(digest(token),uid,time.time()+SESSION_TTL))
+        return {'token':token,'user_id':uid,'expires_in':SESSION_TTL}
 
     def identity(self,token):
         with self.connect() as c:
-            row=c.execute('SELECT user_id FROM sessions WHERE hash=? AND expires>?',(digest(token),time.time())).fetchone()
-            if not row:fail(401,'请登录项目记忆服务')
+            now=time.time()
+            row=c.execute('SELECT user_id,expires FROM sessions WHERE hash=? AND expires>?',(digest(token),now)).fetchone()
+            if not row:fail(401,'登录已过期或无效，请运行 waystone login 重新登录')
+            # 滑动续期：剩余不足 29 天时续到 30 天，每个会话每天最多写一次库，查询路径不必每次加写。
+            if row['expires']-now<SESSION_TTL-86400:c.execute('UPDATE sessions SET expires=? WHERE hash=?',(now+SESSION_TTL,digest(token)))
             return row['user_id']
 
-    def login(self,email,password,backend):
+    def authenticate(self,email,password,backend):
+        """校验账号密码并返回用户 ID，不创建会话；设备登录和 OAuth 授权页共用。"""
         with self.connect() as c:
             row=c.execute('SELECT * FROM users WHERE email=?',(email,)).fetchone()
             if row and row['password']:
                 if not check_password(password,row['password']):fail(401,'账号或密码不正确')
-                return self.session(c,row['id'])
+                return row['id']
         # 上游管理员密码只用于认证请求，不写入项目数据库。
         upstream=backend.authenticate_admin(email,password)
         if not upstream:fail(401,'账号或密码不正确')
         with self.connect() as c:
             row=c.execute('SELECT * FROM users WHERE upstream=?',(str(upstream['id']),)).fetchone()
-            if not row:
-                if c.execute('SELECT 1 FROM users WHERE email=?',(email,)).fetchone():fail(409,'账号身份冲突')
-                uid=ident()
-                c.execute('INSERT INTO users VALUES(?,?,?,?,?)',(uid,email,upstream['name'],None,str(upstream['id'])))
-            else:uid=row['id']
-            return self.session(c,uid)
+            if row:return row['id']
+            if c.execute('SELECT 1 FROM users WHERE email=?',(email,)).fetchone():fail(409,'账号身份冲突')
+            uid=ident()
+            c.execute('INSERT INTO users VALUES(?,?,?,?,?)',(uid,email,upstream['name'],None,str(upstream['id'])))
+            return uid
+
+    def login(self,email,password,backend):
+        uid=self.authenticate(email,password,backend)
+        with self.connect() as c:return self.session(c,uid)
 
     def acl(self,c,p,u,roles=None,write=False):
         row=c.execute('SELECT m.role,p.archived FROM members m JOIN projects p ON p.id=m.project WHERE m.project=? AND m.user_id=?',(p,u)).fetchone()
@@ -205,6 +222,12 @@ class Store:
             self.acl(c,p,u)
             self.expire_due(c,p)
             return [dict(r) for r in c.execute('SELECT * FROM entries WHERE project=? ORDER BY created DESC,id DESC',(p,))]
+
+    def proposals(self,p,u):
+        # recall 只需要待确认提案来提示冲突，不读全部记忆；到期判断直接写在条件里，不在查询路径上写库。
+        with self.connect() as c:
+            self.acl(c,p,u)
+            return [dict(r) for r in c.execute("SELECT * FROM entries WHERE project=? AND status='proposed' AND (expires_at IS NULL OR expires_at>?) ORDER BY created DESC,id DESC",(p,time.time()))]
 
     def entry_page(self,p,u,cursor='',limit=200,status=None):
         with self.connect() as c:

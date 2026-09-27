@@ -1,7 +1,7 @@
 name: waystone
 services:
   api:
-    image: waystone:0.5.0
+    image: waystone:0.6.2
     restart: unless-stopped
     mem_limit: 384m
     cpus: 0.75
@@ -11,6 +11,8 @@ services:
       MEM0_URL: http://mem0:8000
       MEM0_KEY_FILE: /run/secrets/mem0_key
       WAYSTONE_DB: /data/waystone.sqlite
+      # 远程连接器与 OAuth 授权服务的对外地址，必须与用户填写的连接地址前缀完全一致；留空则不启用。
+      PUBLIC_URL: https://memory.example.com
       # 端口只映射到宿主机 127.0.0.1，外部请求必经 Caddy；容器内看到的对端是 Docker 网关而不是 127.0.0.1，
       # 不信任转发头时所有人共用一个限流计数。Caddy 会覆盖客户端自带的 X-Forwarded-For，只写入一个可信来源 IP。
       FORWARDED_ALLOW_IPS: '*'
@@ -21,10 +23,16 @@ services:
       - '127.0.0.1:8900:8900'
     networks: [memory]
     healthcheck:
-      test: [CMD, python, -c, 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8900/ready")']
+      test: [CMD, python, -c, 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8900/health")']
       interval: 30s
-      timeout: 12s
+      timeout: 5s
       retries: 3
+    # 限制容器日志体积，避免长期运行占满磁盘。
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
 networks:
   memory:
     # 改成你的 Mem0 所在的 Docker 网络名（docker network ls 查看），服务通过 MEM0_URL 访问 Mem0。

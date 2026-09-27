@@ -4,6 +4,16 @@
 
 开始前向团队管理员确认 Waystone 服务地址，下文用 `https://memory.example.com` 表示。
 
+## 最简单的方式：远程连接器（无需安装）
+
+服务端启用了远程连接器（`PUBLIC_URL`）时，Claude 网页、Desktop、Cowork、手机，以及 Claude Code、Codex 都可以直接连接 `https://memory.example.com/mcp`（换成你的服务地址，必须逐字一致）。首次连接会打开授权页，用 Waystone 的邮箱和密码批准；授权最长 30 天，可随时断开。
+
+- Claude 网页、Desktop、Cowork、手机：设置 → 连接器 → 添加自定义连接器，填入上面的地址（Team、Enterprise 套餐需要组织所有者添加）。
+- Claude Code：`claude mcp add --transport http --scope user waystone-remote https://memory.example.com/mcp`，然后在交互式终端运行 `claude mcp login waystone-remote` 或在 Claude Code 里 `/mcp` 完成授权。
+- Codex：`codex mcp add waystone-remote --url https://memory.example.com/mcp`，然后在终端运行 `codex mcp login waystone-remote`，在它等待期间于浏览器批准。
+
+授权页会显示应用自报名称（未经验证）、回调地址和权限范围；只批准你本人刚刚发起的连接。远程连接器不能预览本机文件、不能创建项目，这些操作仍按下文安装命令行。Skill 仍建议安装，Agent 才知道何时查询、如何整理后保存。
+
 ## 1. 检查环境
 
 需要 Python 3.11+ 和 [uv](https://docs.astral.sh/uv/)。先运行 `python --version` 与 `uv --version`。缺少时按系统的正常流程安装；不要关闭 TLS 校验，不要执行来源不明的脚本。
