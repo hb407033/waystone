@@ -11,25 +11,40 @@ For small-team, single-instance self-hosting: one server, maintenance windows al
 
 ## First-time deployment
 
+These steps are for a new server. For an existing deployment, follow [Upgrades](#upgrades) and preserve its data, secrets, and configuration. Run the build and smoke commands from the checked-out source directory:
+
+```bash
+git clone --branch v0.6.2 --depth 1 https://github.com/hb407033/waystone.git
+cd waystone
+```
+
 1. Deploy the [Mem0 official self-hosted service](https://docs.mem0.ai/open-source/setup), create an admin account, and generate a service API key for Waystone.
 2. On the server, prepare `/opt/waystone` (the backup and monitoring scripts use this path by default), place `deploy/compose.yaml` there, and create the `data/` directory plus a `secrets/mem0_key` file with 600 permissions.
-3. Edit `compose.yaml` for your environment: the image tag, `MEM0_URL`, and the external network name (the example uses `mem0_default`).
+3. Edit `compose.yaml` for your environment: image `waystone:0.6.2`, `MEM0_URL`, and the external network name (the example uses `mem0_default`). Set `PUBLIC_URL` to the full public origin, including any port, to let members use remote MCP without installing the CLI.
 4. Build and start:
 
    ```bash
-   docker build -t waystone:0.5.0 .
+   docker build -t waystone:0.6.2 .
    docker compose -f /opt/waystone/compose.yaml up -d
    ```
 
 5. Configure your domain following `deploy/Caddyfile.example`. If you're not behind Cloudflare, you can drop the `@cloudflare` branch and keep only the `header_up X-Forwarded-For {remote_host}` section.
-6. Confirm `curl https://memory.example.com/ready` returns `{"status":"ready"}`, then create the first project with `waystone login --server https://memory.example.com` using the Mem0 admin account.
+6. Confirm `curl https://memory.example.com/ready` returns `{"status":"ready"}`. Install the [local CLI](install.md#local-setup), run `waystone login --server https://memory.example.com` using the Mem0 admin account, then run `waystone projects`; if the intended project does not exist, explicitly create it with `waystone --directory /absolute/path/to/repo init "Project name"`. Login itself does not create a project.
 7. (Recommended) Run an isolated smoke test against the real Mem0 with the new image; it uses a temporary database and afterwards only cleans up the vectors created during this test:
 
    ```bash
    docker run --rm --network mem0_default -e MEM0_URL=http://mem0:8000 -e MEM0_KEY_FILE=/run/secrets/mem0_key \
      -v /opt/waystone/secrets/mem0_key:/run/secrets/mem0_key:ro -v "$PWD/deploy/smoke.py:/app/smoke.py:ro" \
-     waystone:0.5.0 python /app/smoke.py
+     waystone:0.6.2 python /app/smoke.py
    ```
+
+### Give teammates one setup link
+
+Invite each member to the intended project with `waystone --directory /absolute/path/to/repo invite colleague@example.com`, then pass along the returned invitation URL, public server address, and [Agent installation guide](install.md). Members accept the invitation and authorize their own clients; they do not need SSH access.
+
+The shared Markdown entry point is `https://raw.githubusercontent.com/hb407033/waystone/main/docs/install.md`. For Chinese-speaking teammates, start with [中文快速上手](quickstart.zh-CN.md).
+
+If you serve instructions on your own domain, copy `docs/install.md` and the matching release's `skills/waystone/SKILL.md` to `/var/www/waystone/install.md` and `/var/www/waystone/waystone-skill.md`. The sample Caddyfile already serves those paths. Fill in the real server address and client choice when sharing the setup prompt; preserve custom ports. Static copies do not update automatically: refresh them when changing the release. GitHub-relative links in the guide are intended for repository browsing; use the absolute GitHub Markdown entry point when asking an agent to install.
 
 ## Server configuration
 

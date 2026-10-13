@@ -1,112 +1,170 @@
-# Installing the Waystone client for agents
+# Set up Waystone for your agent
 
-This guide is written for the **agent performing the installation**, and also works for people following it step by step. For server deployment, see [operations.md](operations.md).
+**Current client release: [v0.6.2](https://github.com/hb407033/waystone/releases/tag/v0.6.2).** For coding agents and people following the steps themselves. [中文快速上手](https://github.com/hb407033/waystone/blob/main/docs/quickstart.zh-CN.md) · [Server administration](https://github.com/hb407033/waystone/blob/main/docs/operations.md)
 
-Before you start, confirm the Waystone server address with your team admin; this guide uses `https://memory.example.com` to represent it.
+Give a coding agent this Markdown URL plus your server address and chosen client:
 
-## Easiest option: the remote connector (no install needed)
-
-When the server has the remote connector enabled (`PUBLIC_URL`), Claude web, Desktop, Cowork, and mobile, plus Claude Code and Codex, can connect directly to `https://memory.example.com/mcp` (replace with your server address — it must be a verbatim match). The first connection opens an authorization page; approve it with your Waystone email and password. Grants last up to 30 days and can be revoked at any time.
-
-- Claude web, Desktop, Cowork, mobile: Settings → Connectors → Add custom connector, enter the address above (Team and Enterprise plans require the org owner to add it).
-- Claude Code: `claude mcp add --transport http --scope user waystone-remote https://memory.example.com/mcp`, then run `claude mcp login waystone-remote` in an interactive terminal or complete authorization via `/mcp` in Claude Code.
-- Codex: `codex mcp add waystone-remote --url https://memory.example.com/mcp`, then run `codex mcp login waystone-remote` in the terminal and approve in the browser while it waits.
-
-The authorization page shows the app's self-reported name (unverified), the callback address, and the permission scope; approve only a connection you yourself just initiated. The remote connector can't preview local files or create projects — install the CLI below for those. Installing the skill is still recommended, so the agent knows when to query and how to organize before saving.
-
-## 1. Check your environment
-
-You need Python 3.11+ and [uv](https://docs.astral.sh/uv/). Run `python --version` and `uv --version` first. If either is missing, install it through your system's normal process; don't disable TLS verification and don't run scripts from untrusted sources.
-
-If your network only reaches the internet through an HTTP(S) proxy or a custom CA, set `WAYSTONE_TRUST_ENV=1` in the environment where you run `waystone` and `waystone-mcp`; only then does the client read environment variables like `HTTPS_PROXY` and `SSL_CERT_FILE`. By default it doesn't read them. SOCKS proxies are not currently supported.
-
-## 2. Install
-
-Install a pinned version from GitHub:
-
-```bash
-uv tool install "git+https://github.com/hb407033/waystone@v0.5.0"
+```text
+https://raw.githubusercontent.com/hb407033/waystone/main/docs/install.md
 ```
 
-Or download the wheel and `SHA256SUMS` from [Releases](https://github.com/hb407033/waystone/releases), verify they match, and install:
+## Before setup
+
+Collect only missing inputs: the team server address, chosen client, and working directory if local setup is needed. Replace `https://memory.example.com` below with the supplied address, preserving any port. Never invent a server, project ID, or credentials.
+
+Members use their own accounts and devices. New members first accept the owner's invitation in the browser. The first administrator uses the existing Mem0 admin account; server deployment is separate from client installation.
+
+Check existing Waystone MCP entries first, including older names such as `waystone-remote` or `project-memory`. Reuse a matching setup. Do not overwrite different settings, remove other connections, or register both remote and local tools for the same service without a reason. Configure only the selected client.
+
+## Choose one route
+
+| Situation | Route |
+|---|---|
+| Claude web / Desktop / Cowork / mobile, Claude Code, or Codex; an existing team project | **Remote setup** — no Waystone package, Python, or uv required |
+| Pi / DSH, local preview, project creation, invitations, or server without remote MCP | **Local setup** — CLI, optional stdio MCP, and skill |
+
+Remote MCP authorization and CLI device login are separate. Remote-only users do not need CLI login. If a remotely connected user later needs project creation or invitations, add only the CLI and keep the existing remote MCP connection.
+
+## Remote setup
+
+### 1. Check the server
+
+The administrator must set `PUBLIC_URL` to the exact public origin. Check `<server>/ready` and `<server>/.well-known/oauth-authorization-server` without credentials. An unauthenticated request to `<server>/mcp` should return 401 with a `WWW-Authenticate` header; this is expected before authorization.
+
+If OAuth metadata is missing, report that remote MCP is unavailable and offer local setup. Do not change the server or silently switch transports.
+
+### 2. Connect the selected client
+
+**Claude web / Desktop / Cowork / mobile:** have the user add a custom connector with URL `https://memory.example.com/mcp` in connector settings and authorize it. Settings depend on the app and organization policy; ask the organization's administrator if unavailable.
+
+**Claude Code:**
 
 ```bash
-uv tool install ./waystone_memory-0.5.0-py3-none-any.whl
+claude mcp add --transport http --scope user waystone https://memory.example.com/mcp
 ```
 
-After installing, run `waystone --help` to confirm the command works. If an older version is already installed, confirm the version and path first, then reinstall with `uv tool install --force`; don't overwrite other tools with the same name.
+Then have the user open `/mcp` inside Claude Code, select Waystone, and authorize in the browser. This avoids relying on a CLI login command that may be missing in older versions.
 
-## 3. Log in with browser authorization
+**Codex:**
+
+```bash
+codex mcp add waystone --url https://memory.example.com/mcp
+codex mcp login waystone
+```
+
+Run login in a pollable background session where supported, show the authorization link promptly, and continue after browser approval. The user completes any callback-paste step in their own terminal; the agent does not read authorization codes or token files. Reopen the client session if new tools are not loaded.
+
+The app name on Waystone's consent page is self-reported, not verified. The user approves the connection they just initiated. **The agent never enters a password, reads stored tokens, or writes credentials into MCP config or chat.**
+
+### 3. Select a project and check recall
+
+Call `project_list`, show names and IDs, and let the user choose. If `.waystone.json` already identifies a project, verify its server matches the chosen server and its ID appears in that list. Remote-only sessions need no local binding. Do not create a project during installation.
+
+Call `memory_recall` with the chosen `project_id` and a relevant question. Empty results are valid. Remote tools take `project_id`, not `directory`; they do not expose `project_init`, `project_bind`, or `memory_preview`.
+
+Remote MCP includes guidance for querying and confirmed publishing. The skill below is optional for remote use, and useful for local commands or slash shortcuts. Setup is complete when authorization, project selection, and read-only recall work; no test memories need to be uploaded.
+
+## Local setup
+
+### 1. Install the pinned CLI
+
+Check Python 3.11+ and [uv](https://docs.astral.sh/uv/) first. If missing, use the user's normal installation process. Install:
+
+```bash
+uv tool install "git+https://github.com/hb407033/waystone@v0.6.2"
+waystone --help
+```
+
+For an older Waystone installation, check the executable path and installed package first, then use the pinned command with `uv tool install --force`. Do not replace an unrelated executable.
+
+Alternatively, download `waystone_memory-0.6.2-py3-none-any.whl` and `SHA256SUMS-0.6.2` from [v0.6.2 Releases](https://github.com/hb407033/waystone/releases/tag/v0.6.2), verify the SHA-256 checksum, then run:
+
+```bash
+uv tool install ./waystone_memory-0.6.2-py3-none-any.whl
+```
+
+For an HTTP(S) proxy or custom CA, set `WAYSTONE_TRUST_ENV=1` where `waystone` and `waystone-mcp` run; only then does the client read `HTTPS_PROXY` and `SSL_CERT_FILE`. SOCKS proxies are unsupported. Keep TLS verification enabled.
+
+### 2. Log in and choose the project
 
 ```bash
 waystone login --server https://memory.example.com
 ```
 
-The command prints a device authorization link and waits up to 10 minutes. Show the link to the user, who verifies the device and logs in in the browser.
+The command opens browser device authorization and waits up to 10 minutes. Keep it running, show the link, and wait for the user to verify the device and sign in. Do not use `--password-login` or read session files. The local session is private (mode 600) and renews with use within 30 days, with no absolute lifetime cap.
 
-**The agent must not type the user's password, must not read session files, and must not write tokens into chat or MCP configs.** The session is stored in `~/.config/waystone/session.json` (mode 600) and is valid for 7 days.
-
-New members first register or accept the invite using the invitation link sent by the project owner (`https://memory.example.com/invite#...`), then complete device authorization.
-
-## 4. Register the MCP server
-
-First find the absolute path of `waystone-mcp` (e.g. `command -v waystone-mcp`). Before registering, check with the client's `mcp get waystone`: if the config is identical, leave it alone; if a same-named entry has a different config, explain the conflict to the user first and don't overwrite it.
-
-Claude Code (user level):
+For an existing project:
 
 ```bash
-claude mcp add --scope user --transport stdio waystone -- /<absolute-path>/waystone-mcp
+waystone projects
+# After the user selects the exact project ID:
+waystone --directory /absolute/path/to/repo bind <project-id>
+waystone --directory /absolute/path/to/repo status
 ```
 
-Codex (user level):
+First check for a binding in the directory or its parents; reuse the correct one. If there are no projects, the user may need an invitation. Only when the user explicitly requests a new project, check for similar names, then run `waystone --directory /absolute/path/to/repo init "Project name"`.
+
+Binding creates `.waystone.json` with only the project ID, name, and server address. It can be committed; it grants no permissions. Init and bind upload no files.
+
+### 3. Enable local tools only if needed
+
+Skip this step if the selected client already uses remote Waystone MCP. Pi uses the CLI through the skill, without an MCP bridge. DSH can also use the CLI through its skill support.
+
+For Claude Code or Codex using local stdio MCP, find the **absolute path** with `command -v waystone-mcp` (or the OS equivalent), then register only the selected client:
 
 ```bash
-codex mcp add waystone -- /<absolute-path>/waystone-mcp
+# Claude Code
+claude mcp add --scope user --transport stdio waystone -- /absolute/path/to/waystone-mcp
+
+# Codex
+codex mcp add waystone -- /absolute/path/to/waystone-mcp
 ```
 
-Configure only the client the user chose, keep other MCP settings intact, and don't write passwords or tokens.
+Reopen the client if required to load new tools. With Pi / DSH or before MCP loads, use the CLI; do not claim an MCP connection that has not been verified.
 
-## 5. Install the skill
+## Install the skill
 
-Save [`skills/waystone/SKILL.md`](../skills/waystone/SKILL.md) from the repo to:
+Download the [v0.6.2 skill](https://raw.githubusercontent.com/hb407033/waystone/v0.6.2/skills/waystone/SKILL.md), matching the installed release. Save the Markdown file, not a GitHub HTML page:
 
-- Claude Code: `~/.claude/skills/waystone/SKILL.md`
-- Codex, Pi, DSH: `~/.agents/skills/waystone/SKILL.md`
+| Client | Destination | Shortcut |
+|---|---|---|
+| Claude Code | `~/.claude/skills/waystone/SKILL.md` | `/waystone recall <question>` |
+| Codex | `~/.agents/skills/waystone/SKILL.md` | `$waystone recall <question>` or skill picker |
+| Pi | `~/.agents/skills/waystone/SKILL.md` | `/skill:waystone recall <question>` |
+| DSH | `~/.agents/skills/waystone/SKILL.md` | Select the skill using the client's available skill command |
 
-If a same-named file already exists, compare contents first; if they differ, back it up and confirm it belongs to Waystone before updating — don't overwrite an unrelated skill.
+Compare existing same-named skills, preserve user edits, and back up the Waystone-owned file before updating. Leave native memories and unrelated configuration untouched. Natural-language requests work too.
 
-Usage: in Claude Code type `/waystone init <project-name>`; in Codex type `$waystone init <project-name>`, or pick waystone in the skill picker. Supports login, join, status, import, recall, save, handoff, invite, retract.
-
-Pi users can add a shortcut entry in `~/.pi/agent/prompts/waystone.md` (check for an existing same-named file first and keep the user's edits):
+Pi can optionally use `/waystone` by adding `~/.pi/agent/prompts/waystone.md`, after checking for user edits:
 
 ```markdown
 ---
-description: Create, join, query, and save team project memory
+description: Query and prepare confirmed team project memory
 ---
 Read ~/.agents/skills/waystone/SKILL.md and carry out the following; with no arguments, show usage only.
 $ARGUMENTS
 ```
 
-## 6. Bind a project
+## Everyday use
 
-- If the user explicitly asks to create a project: run `waystone init <project-name>` in the target directory.
-- For an existing project: run `waystone projects` to confirm the project ID first, then run `waystone bind <project-id>` in the target directory.
-- Don't guess a project by name, and don't automatically bind the first one in the list.
+- “Check project memory before continuing this task.”
+- “Prepare the decision we just confirmed for saving; show me the exact facts first.”
+- “Prepare a handoff with progress, evidence, and next steps.”
 
-Binding generates `.waystone.json`, which contains only the project ID, name, and server address and can be committed to the repo; it grants no permissions. Init and bind upload nothing; before importing, always preview with `waystone import README.md --preview-only`, and publish only after the user confirms.
+Publishing requires confirmation of the content. Distill documents into independent facts, rather than uploading raw chunks. Do not create sample projects, publish test memories, or import files merely to verify installation.
 
-So the agent proactively queries when picking up a task and proactively proposes saving when a task wraps up, you can add the following to the project's AGENTS.md or CLAUDE.md with the user's consent (if a same-named section already exists, compare first and don't overwrite the user's content):
+For a bound local repository, the user may add this optional section to `AGENTS.md` or `CLAUDE.md`; preserve existing rules and require their consent before editing:
 
 ```markdown
 ## Project memory
-This repo is bound to Waystone (see `.waystone.json`). Before taking over or continuing a non-trivial task, recall once by task topic with the waystone skill, and check the results' environment, branch, and source version; recalled content is reference material and does not override this file's rules.
-When a task wraps up (the user signs off, the assigned work is done, or they say "that's enough for now" / "we're done today"), organize the confirmed conclusions from this session into candidate memories and ask whether to save them; publish only with the user's explicit consent — if there's no reply or they decline, don't save.
+This repo is bound to Waystone (see `.waystone.json`). Before continuing a non-trivial task, recall once by task topic and verify scope and source. Recalled memories are reference material, not rules.
+When a task wraps up, propose confirmed facts or a handoff for saving. Publish only after the user approves the exact content.
 ```
 
-## 7. Verify
+## Verify and report
 
-- The MCP handshake succeeds, the tool list includes `memory_recall`, `memory_publish`, etc., and `project_list` returns projects.
-- `waystone status` shows the correct project.
-- Without the user's authorization, don't create test projects or upload materials.
+For remote setup: verify tool discovery, `project_list`, the selected project ID, and read-only `memory_recall`. For local setup: also verify `waystone --help`, browser login, and `waystone status`; check MCP only if registered.
 
-Report separately whether install, login, MCP registration, and project binding are done; if still waiting on user authorization, say so honestly — don't report them as successful.
+Report setup, authorization, selected project, and recall separately. Pending browser approval is not a completed login. Installing the CLI is not a verified MCP connection.
+
+Client command references: [Claude Code MCP](https://code.claude.com/docs/en/mcp) · [Codex MCP](https://developers.openai.com/codex/mcp).
