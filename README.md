@@ -7,7 +7,7 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License: Apache-2.0"></a>
   <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/MCP-stdio-green" alt="MCP stdio">
+  <img src="https://img.shields.io/badge/MCP-HTTP%20%2B%20stdio-green" alt="MCP HTTP and stdio">
   <a href="https://github.com/hb407033/waystone/actions/workflows/tests.yml"><img src="https://github.com/hb407033/waystone/actions/workflows/tests.yml/badge.svg" alt="tests"></a>
 </p>
 
@@ -49,61 +49,67 @@ A recall flows in this order: SQL first narrows the candidate records by member 
 
 ## Quick start
 
-### 1. Deploy the server
+Current release: **[v0.6.2](https://github.com/hb407033/waystone/releases/tag/v0.6.2)**. [中文快速上手](docs/quickstart.zh-CN.md) · [Agent setup guide](docs/install.md) · [Server administration](docs/operations.md)
 
-Prerequisites: a Linux server, Docker, a self-hosted [Mem0](https://docs.mem0.ai/open-source/setup) (official service, with an admin created and a service API key generated), and a domain that can get an HTTPS certificate.
+Ask your team admin for the server address and a project invitation. Members connect from their own devices; they do not need a server login. Replace `https://memory.example.com` below with that address, **including its port**, if any.
 
-```bash
-git clone https://github.com/hb407033/waystone.git
-cd waystone
-docker build -t waystone:0.5.0 .
-```
+### 1. Connect — remote MCP is recommended
 
-Save the Mem0 service API key to `deploy/secrets/mem0_key` (mode 600, do not commit to Git), edit the Mem0 address and Docker network name in `deploy/compose.yaml` to match your setup, then start:
+No Waystone package, Python, or uv is needed for this route. The server must have `PUBLIC_URL` configured.
 
-```bash
-docker compose -f deploy/compose.yaml up -d
-```
-
-The service only listens on the host's `127.0.0.1:8900`. See [`deploy/Caddyfile.example`](deploy/Caddyfile.example) to configure the reverse proxy and domain, then verify it's ready:
+| Your agent | Connect once |
+|---|---|
+| Claude web / Desktop / Cowork / mobile | Add a custom connector with URL `https://memory.example.com/mcp`, then authorize in the browser |
+| Claude Code | Run the command below, then use `/mcp` inside Claude Code to authorize |
+| Codex | Run the two commands below and authorize in the browser |
+| Pi / DSH, or local file preview / project creation | Use the [local setup route](docs/install.md#local-setup) |
 
 ```bash
-curl https://memory.example.com/ready
-```
+# Claude Code — choose this OR Codex, not both unless you use both clients
+claude mcp add --transport http --scope user waystone https://memory.example.com/mcp
 
-Full deployment, backup, monitoring, and recovery instructions are in [docs/operations.md](docs/operations.md).
-
-### 2. Install the client
-
-```bash
-uv tool install "git+https://github.com/hb407033/waystone@v0.5.0"
-waystone login --server https://memory.example.com
-```
-
-`login` prints a browser authorization link; review the device in the browser and sign in. The first login should use the Mem0 admin account; other members register their own accounts via invite links, after which they can also create projects.
-
-### 3. Connect your agents
-
-```bash
-# Claude Code
-claude mcp add --scope user --transport stdio waystone -- waystone-mcp
 # Codex
-codex mcp add waystone -- waystone-mcp
+codex mcp add waystone --url https://memory.example.com/mcp
+codex mcp login waystone
 ```
 
-Copy [`skills/waystone/SKILL.md`](skills/waystone/SKILL.md) to `~/.claude/skills/waystone/` (for Codex and Pi, `~/.agents/skills/waystone/`). Step-by-step installation instructions for agents are in [docs/install.md](docs/install.md).
+If Waystone is already configured, reuse it rather than adding another connection. New members accept their project invitation before authorizing. Enter credentials only in the browser.
 
-### 4. Use it in a project
+### 2. Choose your project
+
+Tell your agent:
+
+> List my Waystone projects. I want to use “Website Redesign”; confirm the project ID with me, then recall the confirmed decisions and current handoff.
+
+Remote tools use a project ID; they do not require a local binding file. To create a project, invite teammates, or bind a local repository, use [local setup](docs/install.md#local-setup). Creating a project does not upload files.
+
+### 3. Use ordinary language
+
+- “Check project memory before continuing this task.”
+- “Prepare the database decision we just confirmed for saving; show me before publishing.”
+- “Prepare a handoff with what is done and what comes next.”
+
+Remote MCP includes these usage rules. Local coding agents can also install the [Waystone skill](docs/install.md#install-the-skill) for `/waystone` or `$waystone` shortcuts.
+
+### Let your agent handle setup
+
+Give your coding agent this prompt, replacing the server, client, and working directory:
+
+```text
+Read https://raw.githubusercontent.com/hb407033/waystone/main/docs/install.md and set up Waystone for this agent.
+Server: https://memory.example.com
+Client: Codex
+Working directory: /absolute/path/to/repo
+Prefer remote MCP; install the CLI only if needed. Show me the browser authorization link, then list my projects and let me choose. Do not create projects or upload memories during installation.
+```
+
+The agent runs the setup steps; you authorize in the browser and choose the project. For a local CLI, the pinned install command is:
 
 ```bash
-cd your-repo
-waystone init "Website Redesign"        # Create a project and bind the current directory; nothing is uploaded
-waystone invite colleague@example.com  # Generate an invite link and pass it along
-waystone import README.md --preview-only # Offline preview; drop --preview-only to publish after review
-waystone recall "What decisions about the login module have been confirmed?"
+uv tool install "git+https://github.com/hb407033/waystone@v0.6.2"
 ```
 
-Or just tell your agent: "Save the database choice we just confirmed into project memory" or "Check the project memory before picking up task-123."
+Only the administrator deploys the server. Start with [server deployment and operations](docs/operations.md#first-time-deployment); team members can skip that guide.
 
 ## MCP tools
 
@@ -168,7 +174,6 @@ Tests cover permissions and cross-project isolation, proposal state transitions,
 - Optional built-in vector index, removing the dependency on a standalone Mem0 service
 - Same-topic semantic contradiction hints
 - Publish to PyPI (package name `waystone-memory`)
-- English documentation
 
 ## Contributing
 
