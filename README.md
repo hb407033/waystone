@@ -49,7 +49,7 @@ A recall flows in this order: SQL first narrows the candidate records by member 
 
 ## Quick start
 
-Current release: **[v0.6.2](https://github.com/hb407033/waystone/releases/tag/v0.6.2)**. [中文快速上手](docs/quickstart.zh-CN.md) · [Agent setup guide](docs/install.md) · [Server administration](docs/operations.md)
+Current release: **[v0.6.2](https://github.com/hb407033/waystone/releases/tag/v0.6.2)**. [中文完整使用手册](docs/user-guide.zh-CN.md) · [中文快速上手](docs/quickstart.zh-CN.md) · [Agent setup guide](docs/install.md) · [Server administration](docs/operations.md)
 
 Ask your team admin for the server address and a project invitation. Members connect from their own devices; they do not need a server login. Replace `https://memory.example.com` below with that address, **including its port**, if any.
 
