@@ -2,6 +2,8 @@
 
 **Current client release: [v0.6.2](https://github.com/hb407033/waystone/releases/tag/v0.6.2).** For coding agents and people following the steps themselves. [中文快速上手](https://github.com/hb407033/waystone/blob/main/docs/quickstart.zh-CN.md) · [Server administration](https://github.com/hb407033/waystone/blob/main/docs/operations.md)
 
+For the full team workflow, see [中文完整使用手册](https://github.com/hb407033/waystone/blob/main/docs/user-guide.zh-CN.md).
+
 Give a coding agent this Markdown URL plus your server address and chosen client:
 
 ```text

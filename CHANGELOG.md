@@ -6,6 +6,7 @@ Formatted per [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/); versi
 
 ### Documentation
 
+- Add a complete Chinese user guide covering roles, onboarding, project setup, daily use, conflict review, handoffs, retraction, and troubleshooting.
 - Prefer remote MCP in the quick start; separate member setup from server administration and local CLI setup.
 - Add a single Markdown setup entry point, a Chinese quick start, and project selection plus natural-language usage examples.
 - Pin installation and server examples to 0.6.2, correct session renewal guidance, and document refreshing self-hosted setup instructions.

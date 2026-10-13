@@ -2,6 +2,8 @@
 
 当前版本：[v0.6.2](https://github.com/hb407033/waystone/releases/tag/v0.6.2)。团队成员不需要登录服务器；向管理员取得**服务地址和项目邀请链接**即可。
 
+完整的项目创建、邀请、日常保存、冲突处理、交接换机及常见问题见[完整使用手册](user-guide.zh-CN.md)。
+
 ## 最省事：直接连接远程 MCP
 
 适用于 Claude 网页、Desktop、Cowork、手机，以及 Claude Code、Codex。无需安装 Waystone、Python 或 uv。管理员需已启用远程连接器。
